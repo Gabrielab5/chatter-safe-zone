@@ -1,11 +1,27 @@
-
-import React from "react";
+import React, { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Shield, Lock } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 const Index: React.FC = () => {
   const navigate = useNavigate();
+  const { user, loading } = useAuth();
+
+  useEffect(() => {
+    // Redirect to chat if user is already logged in
+    if (user && !loading) {
+      navigate("/chat");
+    }
+  }, [user, loading, navigate]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-white to-blue-50 dark:from-securetalk-primary dark:to-securetalk-secondary">
