@@ -1,107 +1,193 @@
 
 import React, { useState, useEffect } from "react";
 import ChatLayout from "@/components/chat/ChatLayout";
-import ConversationList, { Conversation } from "@/components/chat/ConversationList";
-import MessageArea, { Message } from "@/components/chat/MessageArea";
+import ConversationList from "@/components/chat/ConversationList";
+import MessageArea from "@/components/chat/MessageArea";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/components/ui/use-toast";
 
-const sampleConversations: Conversation[] = [
-  {
-    id: "1",
-    name: "Alice Johnson",
-    lastMessage: "The encryption keys have been updated.",
-    time: "10:42 AM",
-    unread: 2,
-  },
-  {
-    id: "2",
-    name: "Bob Smith",
-    lastMessage: "Did you receive the secure file?",
-    time: "Yesterday",
-    unread: 0,
-  },
-  {
-    id: "3",
-    name: "Carol Taylor",
-    lastMessage: "Let's use the new encryption protocol.",
-    time: "Yesterday",
-    unread: 0,
-  },
-  {
-    id: "4",
-    name: "Dave Wilson",
-    lastMessage: "I've sent you the private key.",
-    time: "Monday",
-    unread: 0,
-  },
-  {
-    id: "5",
-    name: "Eve Martin",
-    lastMessage: "I need access to the secure server.",
-    time: "Monday",
-    unread: 0,
-  }
-];
+interface Conversation {
+  id: string;
+  name: string | null;
+  is_group: boolean;
+  lastMessage?: string;
+  time?: string;
+  unread?: number;
+  participants?: any[];
+}
 
-const initialMessages: Record<string, Message[]> = {
-  "1": [
-    {
-      id: "1-1",
-      content: "Hi there! Have you implemented the new encryption standards?",
-      sender: "contact",
-      timestamp: new Date(Date.now() - 3600000),
-      delivered: true,
-      read: true,
-    },
-    {
-      id: "1-2",
-      content: "Yes, we're using AES-256 for all communications now.",
-      sender: "user",
-      timestamp: new Date(Date.now() - 3000000),
-      delivered: true,
-      read: true,
-    },
-    {
-      id: "1-3",
-      content: "Great! The encryption keys have been updated as well.",
-      sender: "contact",
-      timestamp: new Date(Date.now() - 600000),
-      delivered: true,
-      read: false,
-    },
-  ],
-  "2": [
-    {
-      id: "2-1",
-      content: "I sent you an encrypted document. Can you check if you received it?",
-      sender: "contact",
-      timestamp: new Date(Date.now() - 86400000),
-      delivered: true,
-      read: true,
-    },
-    {
-      id: "2-2",
-      content: "Got it. I'll decrypt it with my private key and take a look.",
-      sender: "user",
-      timestamp: new Date(Date.now() - 80000000),
-      delivered: true,
-      read: true,
-    },
-  ],
-};
+interface Message {
+  id: string;
+  content: string;
+  sender: "user" | "contact";
+  timestamp: Date;
+  delivered: boolean;
+  read: boolean;
+  senderId: string;
+}
 
 const Chat: React.FC = () => {
   const [activeConversationId, setActiveConversationId] = useState<string>("");
   const [showConversations, setShowConversations] = useState(true);
-  const [messages, setMessages] = useState<Record<string, Message[]>>(initialMessages);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
   
   const isMobile = useIsMobile();
+  const { user } = useAuth();
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!isMobile) {
       setShowConversations(true);
     }
   }, [isMobile]);
+
+  useEffect(() => {
+    if (user) {
+      loadConversations();
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (activeConversationId) {
+      loadMessages(activeConversationId);
+    }
+  }, [activeConversationId]);
+
+  const loadConversations = async () => {
+    try {
+      const { data: participantData, error } = await supabase
+        .from('conversation_participants')
+        .select(`
+          conversation_id,
+          conversations (
+            id,
+            name,
+            is_group,
+            created_at,
+            conversation_participants (
+              user_id,
+              profiles (
+                full_name,
+                email
+              )
+            )
+          )
+        `)
+        .eq('user_id', user?.id);
+
+      if (error) {
+        console.error('Error loading conversations:', error);
+        return;
+      }
+
+      const conversationsData = participantData?.map(p => {
+        const conv = p.conversations;
+        const participants = conv.conversation_participants || [];
+        
+        // For 1-on-1 chats, use the other person's name
+        let displayName = conv.name;
+        if (!conv.is_group && participants.length === 2) {
+          const otherParticipant = participants.find(part => part.user_id !== user?.id);
+          displayName = otherParticipant?.profiles?.full_name || otherParticipant?.profiles?.email || 'Unknown User';
+        }
+
+        return {
+          id: conv.id,
+          name: displayName,
+          is_group: conv.is_group,
+          lastMessage: "No messages yet",
+          time: new Date(conv.created_at).toLocaleDateString(),
+          unread: 0,
+          participants
+        };
+      }) || [];
+
+      setConversations(conversationsData);
+      setLoading(false);
+    } catch (error) {
+      console.error('Error loading conversations:', error);
+      setLoading(false);
+    }
+  };
+
+  const loadMessages = async (conversationId: string) => {
+    try {
+      const { data: messagesData, error } = await supabase
+        .from('messages')
+        .select(`
+          *,
+          profiles:sender_id (
+            full_name,
+            email
+          )
+        `)
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Error loading messages:', error);
+        return;
+      }
+
+      // Decrypt messages
+      const decryptedMessages = await Promise.all(
+        messagesData?.map(async (msg) => {
+          try {
+            const response = await supabase.functions.invoke('encryption', {
+              body: {
+                action: 'decrypt',
+                conversationId,
+                encryptedMessage: msg.content_encrypted,
+                iv: msg.iv
+              }
+            });
+
+            if (response.error) {
+              console.error('Decryption error:', response.error);
+              return {
+                id: msg.id,
+                content: '[Decryption failed]',
+                sender: msg.sender_id === user?.id ? 'user' as const : 'contact' as const,
+                timestamp: new Date(msg.created_at),
+                delivered: true,
+                read: true,
+                senderId: msg.sender_id
+              };
+            }
+
+            return {
+              id: msg.id,
+              content: response.data.message,
+              sender: msg.sender_id === user?.id ? 'user' as const : 'contact' as const,
+              timestamp: new Date(msg.created_at),
+              delivered: true,
+              read: true,
+              senderId: msg.sender_id
+            };
+          } catch (error) {
+            console.error('Error decrypting message:', error);
+            return {
+              id: msg.id,
+              content: '[Decryption failed]',
+              sender: msg.sender_id === user?.id ? 'user' as const : 'contact' as const,
+              timestamp: new Date(msg.created_at),
+              delivered: true,
+              read: true,
+              senderId: msg.sender_id
+            };
+          }
+        }) || []
+      );
+
+      setMessages(decryptedMessages);
+    } catch (error) {
+      console.error('Error loading messages:', error);
+    }
+  };
 
   const handleSelectConversation = (id: string) => {
     setActiveConversationId(id);
@@ -110,58 +196,67 @@ const Chat: React.FC = () => {
     }
   };
 
-  const handleSendMessage = (content: string) => {
-    if (!activeConversationId) return;
+  const handleSendMessage = async (content: string) => {
+    if (!activeConversationId || !user) return;
 
-    const newMessage: Message = {
-      id: `${activeConversationId}-${Date.now()}`,
-      content,
-      sender: "user",
-      timestamp: new Date(),
-      delivered: true,
-      read: false,
-    };
+    try {
+      // Encrypt message
+      const encryptResponse = await supabase.functions.invoke('encryption', {
+        body: {
+          action: 'encrypt',
+          conversationId: activeConversationId,
+          message: content
+        }
+      });
 
-    setMessages((prev) => ({
-      ...prev,
-      [activeConversationId]: [
-        ...(prev[activeConversationId] || []),
-        newMessage,
-      ],
-    }));
+      if (encryptResponse.error) {
+        throw encryptResponse.error;
+      }
 
-    // Simulate response
-    setTimeout(() => {
-      const responseMessages = [
-        "I'll check the encryption keys.",
-        "Let me verify the security protocol.",
-        "The message was received securely.",
-        "Your encryption is working perfectly!",
-        "I'll send you the decryption key soon.",
-      ];
-      
-      const responseMessage: Message = {
-        id: `${activeConversationId}-${Date.now() + 1}`,
-        content: responseMessages[Math.floor(Math.random() * responseMessages.length)],
-        sender: "contact",
-        timestamp: new Date(),
-        delivered: true,
-        read: false,
-      };
+      // Store encrypted message
+      const { error: insertError } = await supabase
+        .from('messages')
+        .insert({
+          conversation_id: activeConversationId,
+          sender_id: user.id,
+          content_encrypted: encryptResponse.data.encrypted,
+          iv: encryptResponse.data.iv
+        });
 
-      setMessages((prev) => ({
-        ...prev,
-        [activeConversationId]: [
-          ...(prev[activeConversationId] || []),
-          responseMessage,
-        ],
-      }));
-    }, 2000);
+      if (insertError) {
+        throw insertError;
+      }
+
+      // Reload messages
+      await loadMessages(activeConversationId);
+
+      toast({
+        title: "Message sent",
+        description: "Your encrypted message has been sent successfully.",
+      });
+    } catch (error) {
+      console.error('Error sending message:', error);
+      toast({
+        title: "Error",
+        description: "Failed to send message. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const activeContact = activeConversationId
-    ? sampleConversations.find(c => c.id === activeConversationId) || null
+    ? conversations.find(c => c.id === activeConversationId) || null
     : null;
+
+  if (loading) {
+    return (
+      <ChatLayout>
+        <div className="flex h-full items-center justify-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      </ChatLayout>
+    );
+  }
 
   return (
     <ChatLayout>
@@ -169,7 +264,13 @@ const Chat: React.FC = () => {
         {(!isMobile || showConversations) && (
           <div className={`${isMobile ? "w-full" : "w-1/3"} h-full`}>
             <ConversationList
-              conversations={sampleConversations}
+              conversations={conversations.map(c => ({
+                id: c.id,
+                name: c.name || 'Unnamed Chat',
+                lastMessage: c.lastMessage || 'No messages yet',
+                time: c.time || '',
+                unread: c.unread || 0
+              }))}
               activeId={activeConversationId}
               onSelectConversation={handleSelectConversation}
             />
@@ -181,10 +282,10 @@ const Chat: React.FC = () => {
             <MessageArea
               activeContact={activeContact ? {
                 id: activeContact.id,
-                name: activeContact.name,
-                avatar: activeContact.avatar,
+                name: activeContact.name || 'Unknown',
+                avatar: undefined,
               } : null}
-              messages={activeConversationId ? messages[activeConversationId] || [] : []}
+              messages={messages}
               onSendMessage={handleSendMessage}
             />
           </div>
