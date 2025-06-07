@@ -1,15 +1,15 @@
 
 import React from "react";
 import AuthLayout from "@/components/authentication/AuthLayout";
-import RegisterForm from "@/components/authentication/RegisterForm";
+import EnhancedRegisterForm from "@/components/authentication/EnhancedRegisterForm";
 
 const Register: React.FC = () => {
   return (
     <AuthLayout 
       title="Create Account" 
-      subtitle="Sign up to get started with SecureTalk"
+      subtitle="Join SecureTalk for secure messaging"
     >
-      <RegisterForm />
+      <EnhancedRegisterForm />
     </AuthLayout>
   );
 };

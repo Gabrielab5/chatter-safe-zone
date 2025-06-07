@@ -1,15 +1,15 @@
 
 import React from "react";
 import AuthLayout from "@/components/authentication/AuthLayout";
-import LoginForm from "@/components/authentication/LoginForm";
+import EnhancedLoginForm from "@/components/authentication/EnhancedLoginForm";
 
 const Login: React.FC = () => {
   return (
     <AuthLayout 
       title="Welcome Back" 
-      subtitle="Enter your credentials to access your account"
+      subtitle="Enter your credentials to access your secure chat"
     >
-      <LoginForm />
+      <EnhancedLoginForm />
     </AuthLayout>
   );
 };

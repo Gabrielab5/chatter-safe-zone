@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import { logLoginAttempt, logRegistration, logGoogleAuth, logLogout } from '@/utils/auditLogger';
 
 interface AuthContextType {
   user: User | null;
@@ -33,6 +34,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        console.log('Auth state changed:', event, session?.user?.email);
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
@@ -52,41 +54,73 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signUp = async (email: string, password: string, fullName: string) => {
     const redirectUrl = `${window.location.origin}/`;
     
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-        data: {
-          full_name: fullName,
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: redirectUrl,
+          data: {
+            full_name: fullName,
+          }
         }
-      }
-    });
-    return { error };
+      });
+      
+      // Log the registration attempt
+      logRegistration(email, !error, error?.message);
+      
+      return { error };
+    } catch (error: any) {
+      logRegistration(email, false, error.message);
+      return { error };
+    }
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    return { error };
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      
+      // Log the login attempt
+      logLoginAttempt(email, !error, error?.message);
+      
+      return { error };
+    } catch (error: any) {
+      logLoginAttempt(email, false, error.message);
+      return { error };
+    }
   };
 
   const signInWithGoogle = async () => {
     const redirectUrl = `${window.location.origin}/`;
     
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: redirectUrl,
-      }
-    });
-    return { error };
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+        }
+      });
+      
+      // Log the Google auth attempt
+      logGoogleAuth(!error, error?.message);
+      
+      return { error };
+    } catch (error: any) {
+      logGoogleAuth(false, error.message);
+      return { error };
+    }
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      logLogout();
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
   };
 
   const resetPassword = async (email: string) => {
