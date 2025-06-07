@@ -31,7 +31,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Set up auth state listener
+    console.log('AuthProvider: Setting up auth listener');
+    
+    // Set up auth state listener first
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         console.log('Auth state changed:', event, session?.user?.email);
@@ -41,94 +43,117 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     );
 
-    // Get initial session
+    // Then get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('Initial session:', session?.user?.email);
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      console.log('AuthProvider: Cleaning up auth listener');
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const redirectUrl = `${window.location.origin}/`;
+    console.log('Attempting to sign up user:', email);
     
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          emailRedirectTo: redirectUrl,
           data: {
             full_name: fullName,
           }
         }
       });
       
+      console.log('Sign up result:', { data, error });
+      
       // Log the registration attempt
       logRegistration(email, !error, error?.message);
       
       return { error };
     } catch (error: any) {
+      console.error('Sign up error:', error);
       logRegistration(email, false, error.message);
       return { error };
     }
   };
 
   const signIn = async (email: string, password: string) => {
+    console.log('Attempting to sign in user:', email);
+    
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
+      
+      console.log('Sign in result:', { data, error });
       
       // Log the login attempt
       logLoginAttempt(email, !error, error?.message);
       
       return { error };
     } catch (error: any) {
+      console.error('Sign in error:', error);
       logLoginAttempt(email, false, error.message);
       return { error };
     }
   };
 
   const signInWithGoogle = async () => {
-    const redirectUrl = `${window.location.origin}/`;
+    console.log('Attempting Google sign in');
     
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: redirectUrl,
+          redirectTo: `${window.location.origin}/chat`,
         }
       });
+      
+      console.log('Google sign in result:', { data, error });
       
       // Log the Google auth attempt
       logGoogleAuth(!error, error?.message);
       
       return { error };
     } catch (error: any) {
+      console.error('Google sign in error:', error);
       logGoogleAuth(false, error.message);
       return { error };
     }
   };
 
   const signOut = async () => {
+    console.log('Attempting to sign out');
+    
     try {
       logLogout();
-      await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Sign out error:', error);
+      } else {
+        console.log('Sign out successful');
+      }
     } catch (error) {
       console.error('Sign out error:', error);
     }
   };
 
   const resetPassword = async (email: string) => {
-    const redirectUrl = `${window.location.origin}/reset-password`;
+    console.log('Attempting password reset for:', email);
     
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: redirectUrl,
+      redirectTo: `${window.location.origin}/reset-password`,
     });
+    
+    console.log('Password reset result:', { error });
     return { error };
   };
 

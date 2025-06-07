@@ -43,8 +43,10 @@ const EnhancedLoginForm: React.FC = () => {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Login form submitted with email:', email);
     
     if (!validateForm()) {
+      console.log('Form validation failed');
       return;
     }
     
@@ -54,6 +56,7 @@ const EnhancedLoginForm: React.FC = () => {
       const { error } = await signIn(email, password);
       
       if (error) {
+        console.error('Login error:', error);
         let errorMessage = "An error occurred during login";
         
         if (error.message.includes("Invalid login credentials")) {
@@ -62,6 +65,8 @@ const EnhancedLoginForm: React.FC = () => {
           errorMessage = "Please check your email and confirm your account before logging in.";
         } else if (error.message.includes("Too many requests")) {
           errorMessage = "Too many login attempts. Please wait a moment and try again.";
+        } else if (error.message.includes("User not found")) {
+          errorMessage = "No account found with this email address. Please sign up first.";
         } else {
           errorMessage = error.message;
         }
@@ -72,6 +77,7 @@ const EnhancedLoginForm: React.FC = () => {
           variant: "destructive",
         });
       } else {
+        console.log('Login successful, redirecting to chat');
         toast({
           title: "Login successful!",
           description: "Welcome back to SecureTalk.",
@@ -91,18 +97,22 @@ const EnhancedLoginForm: React.FC = () => {
   };
 
   const handleGoogleLogin = async () => {
+    console.log('Google login button clicked');
     setIsLoading(true);
     
     try {
       const { error } = await signInWithGoogle();
       
       if (error) {
+        console.error('Google login error:', error);
         let errorMessage = "Google login failed";
         
         if (error.message.includes("popup_closed")) {
           errorMessage = "Login popup was closed. Please try again.";
         } else if (error.message.includes("network")) {
           errorMessage = "Network error. Please check your connection and try again.";
+        } else if (error.message.includes("redirect")) {
+          errorMessage = "Redirect error. Please ensure your browser allows popups.";
         } else {
           errorMessage = error.message;
         }
@@ -113,9 +123,10 @@ const EnhancedLoginForm: React.FC = () => {
           variant: "destructive",
         });
       } else {
+        console.log('Google login initiated successfully');
         toast({
-          title: "Login successful!",
-          description: "Welcome to SecureTalk.",
+          title: "Redirecting...",
+          description: "Please complete the Google authentication.",
         });
       }
     } catch (error) {

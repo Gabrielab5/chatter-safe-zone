@@ -66,8 +66,10 @@ const EnhancedRegisterForm: React.FC = () => {
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Register form submitted with email:', email);
     
     if (!validateForm()) {
+      console.log('Form validation failed');
       return;
     }
     
@@ -77,6 +79,7 @@ const EnhancedRegisterForm: React.FC = () => {
       const { error } = await signUp(email, password, name);
       
       if (error) {
+        console.error('Registration error:', error);
         let errorMessage = "Registration failed";
         
         if (error.message.includes("User already registered")) {
@@ -97,9 +100,10 @@ const EnhancedRegisterForm: React.FC = () => {
           variant: "destructive",
         });
       } else {
+        console.log('Registration successful, redirecting to login');
         toast({
           title: "Account created successfully!",
-          description: "Please check your email to verify your account before logging in.",
+          description: "You can now sign in with your credentials.",
         });
         navigate("/login");
       }
@@ -116,18 +120,22 @@ const EnhancedRegisterForm: React.FC = () => {
   };
 
   const handleGoogleSignUp = async () => {
+    console.log('Google signup button clicked');
     setIsLoading(true);
     
     try {
       const { error } = await signInWithGoogle();
       
       if (error) {
+        console.error('Google signup error:', error);
         let errorMessage = "Google signup failed";
         
         if (error.message.includes("popup_closed")) {
           errorMessage = "Signup popup was closed. Please try again.";
         } else if (error.message.includes("network")) {
           errorMessage = "Network error. Please check your connection and try again.";
+        } else if (error.message.includes("redirect")) {
+          errorMessage = "Redirect error. Please ensure your browser allows popups.";
         } else {
           errorMessage = error.message;
         }
@@ -138,9 +146,10 @@ const EnhancedRegisterForm: React.FC = () => {
           variant: "destructive",
         });
       } else {
+        console.log('Google signup initiated successfully');
         toast({
-          title: "Account created successfully!",
-          description: "Welcome to SecureTalk.",
+          title: "Redirecting...",
+          description: "Please complete the Google authentication.",
         });
       }
     } catch (error) {
