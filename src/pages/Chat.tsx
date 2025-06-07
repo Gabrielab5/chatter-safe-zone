@@ -1,65 +1,59 @@
 
-import React, { useState, useEffect } from "react";
-import ChatLayout from "@/components/chat/ChatLayout";
-import ConversationList from "@/components/chat/ConversationList";
-import MessageArea from "@/components/chat/MessageArea";
-import { useIsMobile } from "@/hooks/use-mobile";
-import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/components/ui/use-toast";
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
+import ChatLayout from '@/components/chat/ChatLayout';
+import ConversationList from '@/components/chat/ConversationList';
+import MessageArea from '@/components/chat/MessageArea';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { PlusCircle, Users } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
 
 interface Conversation {
   id: string;
   name: string | null;
   is_group: boolean;
-  lastMessage?: string;
-  time?: string;
-  unread?: number;
-  participants?: any[];
+  created_at: string;
+  participant_count?: number;
 }
 
 interface Message {
   id: string;
-  content: string;
-  sender: "user" | "contact";
-  timestamp: Date;
-  delivered: boolean;
-  read: boolean;
-  senderId: string;
+  content_encrypted: string;
+  iv: string;
+  sender_id: string;
+  created_at: string;
+  decrypted_content?: string;
 }
 
 const Chat: React.FC = () => {
-  const [activeConversationId, setActiveConversationId] = useState<string>("");
-  const [showConversations, setShowConversations] = useState(true);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(true);
-  
-  const isMobile = useIsMobile();
   const { user } = useAuth();
   const { toast } = useToast();
-
-  useEffect(() => {
-    if (!isMobile) {
-      setShowConversations(true);
-    }
-  }, [isMobile]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (user) {
-      loadConversations();
+      fetchConversations();
     }
   }, [user]);
 
   useEffect(() => {
-    if (activeConversationId) {
-      loadMessages(activeConversationId);
+    if (selectedConversation) {
+      fetchMessages();
     }
-  }, [activeConversationId]);
+  }, [selectedConversation]);
 
-  const loadConversations = async () => {
+  const fetchConversations = async () => {
     try {
-      const { data: participantData, error } = await supabase
+      const { data, error } = await supabase
         .from('conversation_participants')
         .select(`
           conversation_id,
@@ -67,192 +61,178 @@ const Chat: React.FC = () => {
             id,
             name,
             is_group,
-            created_at,
-            conversation_participants (
-              user_id,
-              profiles (
-                full_name,
-                email
-              )
-            )
+            created_at
           )
         `)
         .eq('user_id', user?.id);
 
-      if (error) {
-        console.error('Error loading conversations:', error);
-        return;
-      }
+      if (error) throw error;
 
-      const conversationsData = participantData?.map(p => {
-        const conv = p.conversations;
-        const participants = conv.conversation_participants || [];
-        
-        // For 1-on-1 chats, use the other person's name
-        let displayName = conv.name;
-        if (!conv.is_group && participants.length === 2) {
-          const otherParticipant = participants.find(part => part.user_id !== user?.id);
-          displayName = otherParticipant?.profiles?.full_name || otherParticipant?.profiles?.email || 'Unknown User';
-        }
-
-        return {
-          id: conv.id,
-          name: displayName,
-          is_group: conv.is_group,
-          lastMessage: "No messages yet",
-          time: new Date(conv.created_at).toLocaleDateString(),
-          unread: 0,
-          participants
-        };
-      }) || [];
+      const conversationsData = data?.map(item => ({
+        id: item.conversations.id,
+        name: item.conversations.name,
+        is_group: item.conversations.is_group,
+        created_at: item.conversations.created_at
+      })) || [];
 
       setConversations(conversationsData);
-      setLoading(false);
     } catch (error) {
-      console.error('Error loading conversations:', error);
+      console.error('Error fetching conversations:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load conversations",
+        variant: "destructive"
+      });
+    } finally {
       setLoading(false);
     }
   };
 
-  const loadMessages = async (conversationId: string) => {
+  const fetchMessages = async () => {
+    if (!selectedConversation) return;
+
     try {
-      const { data: messagesData, error } = await supabase
+      const { data, error } = await supabase
         .from('messages')
-        .select(`
-          *,
-          profiles:sender_id (
-            full_name,
-            email
-          )
-        `)
-        .eq('conversation_id', conversationId)
+        .select('*')
+        .eq('conversation_id', selectedConversation)
         .order('created_at', { ascending: true });
 
-      if (error) {
-        console.error('Error loading messages:', error);
-        return;
-      }
+      if (error) throw error;
 
       // Decrypt messages
       const decryptedMessages = await Promise.all(
-        messagesData?.map(async (msg) => {
+        (data || []).map(async (message) => {
           try {
             const response = await supabase.functions.invoke('encryption', {
               body: {
                 action: 'decrypt',
-                conversationId,
-                encryptedMessage: msg.content_encrypted,
-                iv: msg.iv
+                data: message.content_encrypted,
+                iv: message.iv,
+                conversationId: selectedConversation
               }
             });
 
-            if (response.error) {
-              console.error('Decryption error:', response.error);
-              return {
-                id: msg.id,
-                content: '[Decryption failed]',
-                sender: msg.sender_id === user?.id ? 'user' as const : 'contact' as const,
-                timestamp: new Date(msg.created_at),
-                delivered: true,
-                read: true,
-                senderId: msg.sender_id
-              };
-            }
-
             return {
-              id: msg.id,
-              content: response.data.message,
-              sender: msg.sender_id === user?.id ? 'user' as const : 'contact' as const,
-              timestamp: new Date(msg.created_at),
-              delivered: true,
-              read: true,
-              senderId: msg.sender_id
+              ...message,
+              decrypted_content: response.data?.result || 'Failed to decrypt'
             };
           } catch (error) {
-            console.error('Error decrypting message:', error);
+            console.error('Decryption error:', error);
             return {
-              id: msg.id,
-              content: '[Decryption failed]',
-              sender: msg.sender_id === user?.id ? 'user' as const : 'contact' as const,
-              timestamp: new Date(msg.created_at),
-              delivered: true,
-              read: true,
-              senderId: msg.sender_id
+              ...message,
+              decrypted_content: 'Failed to decrypt'
             };
           }
-        }) || []
+        })
       );
 
       setMessages(decryptedMessages);
     } catch (error) {
-      console.error('Error loading messages:', error);
+      console.error('Error fetching messages:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load messages",
+        variant: "destructive"
+      });
     }
   };
 
-  const handleSelectConversation = (id: string) => {
-    setActiveConversationId(id);
-    if (isMobile) {
-      setShowConversations(false);
+  const createGroup = async () => {
+    if (!groupName.trim()) return;
+
+    try {
+      // Create conversation
+      const { data: conversation, error: convError } = await supabase
+        .from('conversations')
+        .insert({
+          name: groupName,
+          is_group: true,
+          created_by: user?.id,
+          session_key_encrypted: 'temp_key' // Will be replaced by proper key generation
+        })
+        .select()
+        .single();
+
+      if (convError) throw convError;
+
+      // Add creator as participant
+      const { error: participantError } = await supabase
+        .from('conversation_participants')
+        .insert({
+          conversation_id: conversation.id,
+          user_id: user?.id
+        });
+
+      if (participantError) throw participantError;
+
+      setGroupName('');
+      setIsCreateGroupOpen(false);
+      fetchConversations();
+      
+      toast({
+        title: "Success",
+        description: "Group created successfully"
+      });
+    } catch (error) {
+      console.error('Error creating group:', error);
+      toast({
+        title: "Error",
+        description: "Failed to create group",
+        variant: "destructive"
+      });
     }
   };
 
-  const handleSendMessage = async (content: string) => {
-    if (!activeConversationId || !user) return;
+  const sendMessage = async () => {
+    if (!newMessage.trim() || !selectedConversation) return;
 
     try {
       // Encrypt message
-      const encryptResponse = await supabase.functions.invoke('encryption', {
+      const response = await supabase.functions.invoke('encryption', {
         body: {
           action: 'encrypt',
-          conversationId: activeConversationId,
-          message: content
+          data: newMessage,
+          conversationId: selectedConversation
         }
       });
 
-      if (encryptResponse.error) {
-        throw encryptResponse.error;
-      }
+      if (response.error) throw response.error;
 
-      // Store encrypted message
-      const { error: insertError } = await supabase
+      const { encrypted, iv } = response.data;
+
+      // Save encrypted message
+      const { error } = await supabase
         .from('messages')
         .insert({
-          conversation_id: activeConversationId,
-          sender_id: user.id,
-          content_encrypted: encryptResponse.data.encrypted,
-          iv: encryptResponse.data.iv
+          conversation_id: selectedConversation,
+          sender_id: user?.id,
+          content_encrypted: encrypted,
+          iv: iv
         });
 
-      if (insertError) {
-        throw insertError;
-      }
+      if (error) throw error;
 
-      // Reload messages
-      await loadMessages(activeConversationId);
-
-      toast({
-        title: "Message sent",
-        description: "Your encrypted message has been sent successfully.",
-      });
+      setNewMessage('');
+      fetchMessages(); // Refresh messages
     } catch (error) {
       console.error('Error sending message:', error);
       toast({
         title: "Error",
-        description: "Failed to send message. Please try again.",
-        variant: "destructive",
+        description: "Failed to send message",
+        variant: "destructive"
       });
     }
   };
 
-  const activeContact = activeConversationId
-    ? conversations.find(c => c.id === activeConversationId) || null
-    : null;
-
   if (loading) {
     return (
       <ChatLayout>
-        <div className="flex h-full items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="flex items-center justify-center h-full">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p>Loading conversations...</p>
+          </div>
         </div>
       </ChatLayout>
     );
@@ -261,35 +241,121 @@ const Chat: React.FC = () => {
   return (
     <ChatLayout>
       <div className="flex h-full">
-        {(!isMobile || showConversations) && (
-          <div className={`${isMobile ? "w-full" : "w-1/3"} h-full`}>
-            <ConversationList
-              conversations={conversations.map(c => ({
-                id: c.id,
-                name: c.name || 'Unnamed Chat',
-                lastMessage: c.lastMessage || 'No messages yet',
-                time: c.time || '',
-                unread: c.unread || 0
-              }))}
-              activeId={activeConversationId}
-              onSelectConversation={handleSelectConversation}
-            />
+        <div className="w-1/3 border-r bg-muted/50">
+          <div className="p-4 border-b">
+            <div className="flex justify-between items-center">
+              <h2 className="font-semibold">Conversations</h2>
+              <Dialog open={isCreateGroupOpen} onOpenChange={setIsCreateGroupOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="outline">
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    New Group
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center">
+                      <Users className="h-5 w-5 mr-2" />
+                      Create Group Chat
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <Input
+                      placeholder="Group name"
+                      value={groupName}
+                      onChange={(e) => setGroupName(e.target.value)}
+                    />
+                    <div className="flex justify-end space-x-2">
+                      <Button variant="outline" onClick={() => setIsCreateGroupOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button onClick={createGroup}>
+                        Create Group
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
-        )}
+          
+          <div className="overflow-y-auto">
+            {conversations.map((conversation) => (
+              <div
+                key={conversation.id}
+                className={`p-4 cursor-pointer hover:bg-muted ${
+                  selectedConversation === conversation.id ? 'bg-muted' : ''
+                }`}
+                onClick={() => setSelectedConversation(conversation.id)}
+              >
+                <div className="flex items-center">
+                  {conversation.is_group ? (
+                    <Users className="h-5 w-5 mr-3 text-muted-foreground" />
+                  ) : (
+                    <div className="h-5 w-5 mr-3 rounded-full bg-primary/20" />
+                  )}
+                  <div>
+                    <p className="font-medium">
+                      {conversation.name || 'Direct Message'}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {conversation.is_group ? 'Group Chat' : 'Direct Message'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
 
-        {(!isMobile || !showConversations) && (
-          <div className={`${isMobile ? "w-full" : "w-2/3"} h-full flex flex-col`}>
-            <MessageArea
-              activeContact={activeContact ? {
-                id: activeContact.id,
-                name: activeContact.name || 'Unknown',
-                avatar: undefined,
-              } : null}
-              messages={messages}
-              onSendMessage={handleSendMessage}
-            />
-          </div>
-        )}
+        <div className="flex-1 flex flex-col">
+          {selectedConversation ? (
+            <>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {messages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={`flex ${
+                      message.sender_id === user?.id ? 'justify-end' : 'justify-start'
+                    }`}
+                  >
+                    <div
+                      className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                        message.sender_id === user?.id
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted'
+                      }`}
+                    >
+                      <p>{message.decrypted_content}</p>
+                      <p className="text-xs opacity-70 mt-1">
+                        {new Date(message.created_at).toLocaleTimeString()}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t p-4">
+                <div className="flex space-x-2">
+                  <Input
+                    placeholder="Type a message..."
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                  />
+                  <Button onClick={sendMessage}>Send</Button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center text-muted-foreground">
+                <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Select a conversation to start messaging</p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </ChatLayout>
   );
