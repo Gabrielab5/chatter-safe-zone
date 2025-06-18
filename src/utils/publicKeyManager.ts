@@ -20,3 +20,27 @@ export const uploadPublicKey = async (userId: string, publicKey: CryptoKey): Pro
     throw new Error('Public key upload failed');
   }
 };
+
+// Fetch public key from Supabase
+export const fetchPublicKey = async (userId: string): Promise<JsonWebKey> => {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('public_key')
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      throw new Error(`Failed to fetch public key: ${error.message}`);
+    }
+
+    if (!data || !data.public_key) {
+      throw new Error('No public key found for user');
+    }
+
+    return JSON.parse(data.public_key as string);
+  } catch (error) {
+    console.error('Failed to fetch public key:', error);
+    throw new Error('Public key retrieval failed');
+  }
+};

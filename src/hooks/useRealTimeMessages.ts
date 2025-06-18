@@ -2,6 +2,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useE2ECrypto } from '@/hooks/useE2ECrypto';
+import { useE2EESession } from '@/hooks/useE2EESession';
+import { fetchPublicKey } from '@/utils/publicKeyManager';
 
 interface Message {
   id: string;
@@ -15,6 +18,8 @@ interface Message {
 
 export const useRealTimeMessages = (conversationId: string | null) => {
   const { user } = useAuth();
+  const { encryptMessage, decryptMessage } = useE2ECrypto();
+  const { getSessionPassword } = useE2EESession();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,48 +27,52 @@ export const useRealTimeMessages = (conversationId: string | null) => {
   const isDecryptingRef = useRef(false);
   const mountedRef = useRef(true);
 
-  const decryptMessage = useCallback(async (message: Message): Promise<Message> => {
-    if (!conversationId || !mountedRef.current) return message;
+  // Get recipient user ID for the conversation
+  const getRecipientUserId = useCallback(async (convId: string): Promise<string> => {
+    const { data, error } = await supabase
+      .from('conversation_participants')
+      .select('user_id')
+      .eq('conversation_id', convId)
+      .neq('user_id', user?.id);
+
+    if (error || !data || data.length === 0) {
+      throw new Error('Failed to find recipient');
+    }
+
+    return data[0].user_id;
+  }, [user?.id]);
+
+  const decryptClientMessage = useCallback(async (message: Message): Promise<Message> => {
+    if (!user?.id || !mountedRef.current) return message;
 
     try {
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Decryption timeout')), 8000)
-      );
-
-      const decryptionPromise = supabase.functions.invoke('encryption', {
-        body: {
-          action: 'decrypt',
-          conversationId: conversationId,
-          encryptedMessage: message.content_encrypted,
-          iv: message.iv
-        }
-      });
-
-      const { data, error } = await Promise.race([
-        decryptionPromise,
-        timeoutPromise
-      ]) as any;
-
-      if (error) {
-        console.error('Decryption error for message:', message.id, error);
+      const password = getSessionPassword();
+      if (!password) {
         return {
           ...message,
-          decrypted_content: '🔒 Failed to decrypt message'
+          decrypted_content: '🔒 Password required to decrypt'
         };
       }
 
+      const decryptedContent = await decryptMessage(
+        message.content_encrypted,
+        message.iv,
+        user.id,
+        password
+      );
+
       return {
         ...message,
-        decrypted_content: data?.message || '🔒 Decryption failed'
+        decrypted_content: decryptedContent
       };
     } catch (error) {
       console.error('Decryption error for message:', message.id, error);
       return {
         ...message,
-        decrypted_content: error.message.includes('timeout') ? '🔒 Decryption timeout' : '🔒 Failed to decrypt message'
+        decrypted_content: '🔒 Failed to decrypt message'
       };
     }
-  }, [conversationId]);
+  }, [user?.id, decryptMessage, getSessionPassword]);
 
   // Enhanced batch decryption with better error handling and performance
   const processBatchDecryption = useCallback(async (messagesToDecrypt: Message[]) => {
@@ -82,7 +91,7 @@ export const useRealTimeMessages = (conversationId: string | null) => {
         
         const decryptPromises = batch.map(async (msg) => {
           try {
-            return await decryptMessage(msg);
+            return await decryptClientMessage(msg);
           } catch (error) {
             console.error('Batch decryption error for message:', msg.id, error);
             return {
@@ -130,7 +139,7 @@ export const useRealTimeMessages = (conversationId: string | null) => {
     } finally {
       isDecryptingRef.current = false;
     }
-  }, [decryptMessage]);
+  }, [decryptClientMessage]);
 
   const fetchMessages = useCallback(async () => {
     if (!conversationId || !user || !mountedRef.current) {
@@ -233,7 +242,7 @@ export const useRealTimeMessages = (conversationId: string | null) => {
           // Only process if it's not from the current user
           if (newMessage.sender_id !== user.id) {
             try {
-              const decryptedMessage = await decryptMessage(newMessage);
+              const decryptedMessage = await decryptClientMessage(newMessage);
               
               if (mountedRef.current) {
                 setMessages(prev => {
@@ -272,7 +281,7 @@ export const useRealTimeMessages = (conversationId: string | null) => {
         channelRef.current = null;
       }
     };
-  }, [conversationId, user, fetchMessages, decryptMessage]);
+  }, [conversationId, user, fetchMessages, decryptClientMessage]);
 
   const sendMessage = useCallback(async (content: string) => {
     if (!conversationId || !content.trim() || !user || !mountedRef.current) {
@@ -280,61 +289,23 @@ export const useRealTimeMessages = (conversationId: string | null) => {
     }
 
     try {
-      console.log('Encrypting and sending message...');
+      console.log('Encrypting and sending message using client-side E2EE...');
       
-      // Enhanced encryption with timeout and retry logic
-      let encryptionData;
+      // Get recipient's user ID
+      const recipientUserId = await getRecipientUserId(conversationId);
+      
+      // Fetch recipient's public key
+      const recipientPublicKey = await fetchPublicKey(recipientUserId);
+      
+      // Encrypt the message using client-side encryption
+      const { encryptedMessage, iv } = await encryptMessage(content, recipientPublicKey);
+      
+      console.log('Message encrypted, saving to database...');
+      
+      // Save encrypted message to database
       let retryCount = 0;
       const maxRetries = 2;
-
-      while (retryCount <= maxRetries && mountedRef.current) {
-        try {
-          const encryptionPromise = supabase.functions.invoke('encryption', {
-            body: {
-              action: 'encrypt',
-              conversationId: conversationId,
-              message: content
-            }
-          });
-          
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Encryption timeout')), 10000)
-          );
-          
-          const { data, error: encryptionError } = await Promise.race([
-            encryptionPromise,
-            timeoutPromise
-          ]) as any;
-
-          if (encryptionError) {
-            throw encryptionError;
-          }
-
-          encryptionData = data;
-          break;
-        } catch (error) {
-          retryCount++;
-          console.error(`Encryption attempt ${retryCount} failed:`, error);
-          
-          if (retryCount > maxRetries) {
-            throw new Error('Failed to encrypt message after multiple attempts');
-          }
-          
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-
-      if (!encryptionData || !mountedRef.current) {
-        throw new Error('Encryption failed or component unmounted');
-      }
-
-      const { encrypted, iv } = encryptionData;
-
-      console.log('Saving encrypted message...');
-      
-      // Enhanced message saving with retry logic
       let messageData;
-      retryCount = 0;
       
       while (retryCount <= maxRetries && mountedRef.current) {
         try {
@@ -343,7 +314,7 @@ export const useRealTimeMessages = (conversationId: string | null) => {
             .insert({
               conversation_id: conversationId,
               sender_id: user.id,
-              content_encrypted: encrypted,
+              content_encrypted: encryptedMessage,
               iv: iv
             })
             .select()
@@ -384,7 +355,7 @@ export const useRealTimeMessages = (conversationId: string | null) => {
           return [...prev, newMessage];
         });
         
-        console.log('Message sent and displayed successfully');
+        console.log('Message sent and displayed successfully using client-side E2EE');
       }
 
     } catch (error) {
@@ -393,12 +364,14 @@ export const useRealTimeMessages = (conversationId: string | null) => {
       if (error.message.includes('timeout')) {
         throw new Error('Message sending timed out. Please check your connection and try again.');
       } else if (error.message.includes('encrypt')) {
-        throw new Error('Failed to encrypt message. Please try again.');
+        throw new Error('Failed to encrypt message. Please check your E2EE setup.');
+      } else if (error.message.includes('public key')) {
+        throw new Error('Failed to find recipient\'s public key. They may need to set up E2EE.');
       } else {
         throw new Error('Failed to send message. Please try again.');
       }
     }
-  }, [conversationId, user]);
+  }, [conversationId, user, getRecipientUserId, encryptMessage]);
 
   return { 
     messages, 
