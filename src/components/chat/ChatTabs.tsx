@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MessageCircle, Users } from 'lucide-react';
 import ConversationsList from './ConversationsList';
 import UserSearch from './UserSearch';
+import type { UserPresence } from '@/types/userPresence';
 
 interface Conversation {
   id: string;
@@ -15,11 +16,6 @@ interface Conversation {
     name: string;
     avatar_url?: string;
   };
-}
-
-interface UserPresence {
-  user_id: string;
-  is_online: boolean;
 }
 
 interface ChatTabsProps {

@@ -9,6 +9,7 @@ import { useRealTimeMessages } from '@/hooks/useRealTimeMessages';
 import { useChatLogic } from '@/hooks/useChatLogic';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle } from 'lucide-react';
+import type { UserPresence } from '@/types/userPresence';
 
 const Chat: React.FC = () => {
   const { toast } = useToast();
@@ -55,7 +56,7 @@ const Chat: React.FC = () => {
   };
 
   const isUserOnline = (userId: string) => {
-    return onlineUsers.some(u => u.user_id === userId && u.is_online);
+    return onlineUsers.some((u: UserPresence) => u.user_id === userId && u.is_online);
   };
 
   if (conversationsLoading) {

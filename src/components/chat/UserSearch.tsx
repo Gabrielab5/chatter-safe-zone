@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
@@ -7,17 +6,13 @@ import { Avatar } from '@/components/ui/avatar';
 import { Search, MessageCircle, Users, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import type { UserPresence } from '@/types/userPresence';
 
 interface User {
   id: string;
   email: string;
   full_name: string;
   avatar_url?: string;
-}
-
-interface UserPresence {
-  user_id: string;
-  is_online: boolean;
 }
 
 interface UserSearchProps {
