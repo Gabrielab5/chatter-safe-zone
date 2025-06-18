@@ -3,53 +3,47 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import ChatLayout from '@/components/chat/ChatLayout';
-import ConversationList from '@/components/chat/ConversationList';
-import MessageArea from '@/components/chat/MessageArea';
+import UserSearch from '@/components/chat/UserSearch';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { PlusCircle, Users } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Avatar } from '@/components/ui/avatar';
+import { MessageCircle, Users, Send } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+import { useUserPresence } from '@/hooks/useUserPresence';
+import { useRealTimeMessages } from '@/hooks/useRealTimeMessages';
 
 interface Conversation {
   id: string;
   name: string | null;
   is_group: boolean;
   created_at: string;
-  participant_count?: number;
-}
-
-interface Message {
-  id: string;
-  content_encrypted: string;
-  iv: string;
-  sender_id: string;
-  created_at: string;
-  decrypted_content?: string;
+  last_message?: string;
+  last_message_time?: string;
+  other_user?: {
+    id: string;
+    name: string;
+    avatar_url?: string;
+  };
 }
 
 const Chat: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { onlineUsers } = useUserPresence();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false);
-  const [groupName, setGroupName] = useState('');
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('chats');
+
+  const { messages, loading: messagesLoading, sendMessage } = useRealTimeMessages(selectedConversation);
 
   useEffect(() => {
     if (user) {
       fetchConversations();
     }
   }, [user]);
-
-  useEffect(() => {
-    if (selectedConversation) {
-      fetchMessages();
-    }
-  }, [selectedConversation]);
 
   const fetchConversations = async () => {
     try {
@@ -68,12 +62,47 @@ const Chat: React.FC = () => {
 
       if (error) throw error;
 
-      const conversationsData = data?.map(item => ({
-        id: item.conversations.id,
-        name: item.conversations.name,
-        is_group: item.conversations.is_group,
-        created_at: item.conversations.created_at
-      })) || [];
+      // Fetch conversation details with other participants
+      const conversationsData = await Promise.all(
+        (data || []).map(async (item) => {
+          const conversation = item.conversations;
+          let otherUser = null;
+
+          if (!conversation.is_group) {
+            // For direct messages, get the other participant's info
+            const { data: participants } = await supabase
+              .from('conversation_participants')
+              .select(`
+                user_id,
+                profiles (
+                  id,
+                  full_name,
+                  display_name,
+                  avatar_url
+                )
+              `)
+              .eq('conversation_id', conversation.id)
+              .neq('user_id', user?.id);
+
+            if (participants && participants.length > 0) {
+              const profile = participants[0].profiles;
+              otherUser = {
+                id: profile.id,
+                name: profile.display_name || profile.full_name || 'Unknown User',
+                avatar_url: profile.avatar_url
+              };
+            }
+          }
+
+          return {
+            id: conversation.id,
+            name: conversation.name,
+            is_group: conversation.is_group,
+            created_at: conversation.created_at,
+            other_user: otherUser
+          };
+        })
+      );
 
       setConversations(conversationsData);
     } catch (error) {
@@ -88,141 +117,112 @@ const Chat: React.FC = () => {
     }
   };
 
-  const fetchMessages = async () => {
-    if (!selectedConversation) return;
-
+  const startChat = async (userId: string, userName: string) => {
     try {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', selectedConversation)
-        .order('created_at', { ascending: true });
+      // Check if conversation already exists
+      const { data: existingConversation } = await supabase
+        .from('conversation_participants')
+        .select(`
+          conversation_id,
+          conversations (
+            id,
+            is_group
+          )
+        `)
+        .eq('user_id', user?.id);
 
-      if (error) throw error;
-
-      // Decrypt messages
-      const decryptedMessages = await Promise.all(
-        (data || []).map(async (message) => {
-          try {
-            const response = await supabase.functions.invoke('encryption', {
-              body: {
-                action: 'decrypt',
-                data: message.content_encrypted,
-                iv: message.iv,
-                conversationId: selectedConversation
-              }
-            });
-
-            return {
-              ...message,
-              decrypted_content: response.data?.result || 'Failed to decrypt'
-            };
-          } catch (error) {
-            console.error('Decryption error:', error);
-            return {
-              ...message,
-              decrypted_content: 'Failed to decrypt'
-            };
-          }
-        })
-      );
-
-      setMessages(decryptedMessages);
-    } catch (error) {
-      console.error('Error fetching messages:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load messages",
-        variant: "destructive"
+      const directMessage = existingConversation?.find(conv => {
+        return !conv.conversations.is_group;
       });
-    }
-  };
 
-  const createGroup = async () => {
-    if (!groupName.trim()) return;
+      if (directMessage) {
+        // Check if the other user is in this conversation
+        const { data: otherParticipant } = await supabase
+          .from('conversation_participants')
+          .select('user_id')
+          .eq('conversation_id', directMessage.conversation_id)
+          .eq('user_id', userId)
+          .single();
 
-    try {
-      // Create conversation
+        if (otherParticipant) {
+          setSelectedConversation(directMessage.conversation_id);
+          setActiveTab('chats');
+          return;
+        }
+      }
+
+      // Create new conversation
       const { data: conversation, error: convError } = await supabase
         .from('conversations')
         .insert({
-          name: groupName,
-          is_group: true,
+          name: null,
+          is_group: false,
           created_by: user?.id,
-          session_key_encrypted: 'temp_key' // Will be replaced by proper key generation
+          session_key_encrypted: 'temp_key'
         })
         .select()
         .single();
 
       if (convError) throw convError;
 
-      // Add creator as participant
+      // Add both participants
       const { error: participantError } = await supabase
         .from('conversation_participants')
-        .insert({
-          conversation_id: conversation.id,
-          user_id: user?.id
-        });
+        .insert([
+          {
+            conversation_id: conversation.id,
+            user_id: user?.id
+          },
+          {
+            conversation_id: conversation.id,
+            user_id: userId
+          }
+        ]);
 
       if (participantError) throw participantError;
 
-      setGroupName('');
-      setIsCreateGroupOpen(false);
+      setSelectedConversation(conversation.id);
+      setActiveTab('chats');
       fetchConversations();
       
       toast({
         title: "Success",
-        description: "Group created successfully"
+        description: `Started chat with ${userName}`
       });
     } catch (error) {
-      console.error('Error creating group:', error);
+      console.error('Error starting chat:', error);
       toast({
         title: "Error",
-        description: "Failed to create group",
+        description: "Failed to start chat",
         variant: "destructive"
       });
     }
   };
 
-  const sendMessage = async () => {
+  const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedConversation) return;
 
     try {
-      // Encrypt message
-      const response = await supabase.functions.invoke('encryption', {
-        body: {
-          action: 'encrypt',
-          data: newMessage,
-          conversationId: selectedConversation
-        }
-      });
-
-      if (response.error) throw response.error;
-
-      const { encrypted, iv } = response.data;
-
-      // Save encrypted message
-      const { error } = await supabase
-        .from('messages')
-        .insert({
-          conversation_id: selectedConversation,
-          sender_id: user?.id,
-          content_encrypted: encrypted,
-          iv: iv
-        });
-
-      if (error) throw error;
-
+      await sendMessage(newMessage);
       setNewMessage('');
-      fetchMessages(); // Refresh messages
     } catch (error) {
-      console.error('Error sending message:', error);
       toast({
         title: "Error",
         description: "Failed to send message",
         variant: "destructive"
       });
     }
+  };
+
+  const isUserOnline = (userId: string) => {
+    return onlineUsers.some(u => u.user_id === userId && u.is_online);
+  };
+
+  const getConversationName = (conversation: Conversation) => {
+    if (conversation.is_group) {
+      return conversation.name || 'Group Chat';
+    }
+    return conversation.other_user?.name || 'Direct Message';
   };
 
   if (loading) {
@@ -242,97 +242,106 @@ const Chat: React.FC = () => {
     <ChatLayout>
       <div className="flex h-full">
         <div className="w-1/3 border-r bg-muted/50">
-          <div className="p-4 border-b">
-            <div className="flex justify-between items-center">
-              <h2 className="font-semibold">Conversations</h2>
-              <Dialog open={isCreateGroupOpen} onOpenChange={setIsCreateGroupOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm" variant="outline">
-                    <PlusCircle className="h-4 w-4 mr-2" />
-                    New Group
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle className="flex items-center">
-                      <Users className="h-5 w-5 mr-2" />
-                      Create Group Chat
-                    </DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <Input
-                      placeholder="Group name"
-                      value={groupName}
-                      onChange={(e) => setGroupName(e.target.value)}
-                    />
-                    <div className="flex justify-end space-x-2">
-                      <Button variant="outline" onClick={() => setIsCreateGroupOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button onClick={createGroup}>
-                        Create Group
-                      </Button>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
+            <div className="p-4 border-b">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="chats" className="flex items-center">
+                  <MessageCircle className="h-4 w-4 mr-2" />
+                  Chats
+                </TabsTrigger>
+                <TabsTrigger value="users" className="flex items-center">
+                  <Users className="h-4 w-4 mr-2" />
+                  Users
+                </TabsTrigger>
+              </TabsList>
+            </div>
+
+            <TabsContent value="chats" className="flex-1 overflow-y-auto m-0">
+              <div className="space-y-1">
+                {conversations.map((conversation) => (
+                  <div
+                    key={conversation.id}
+                    className={`p-4 cursor-pointer hover:bg-muted ${
+                      selectedConversation === conversation.id ? 'bg-muted' : ''
+                    }`}
+                    onClick={() => setSelectedConversation(conversation.id)}
+                  >
+                    <div className="flex items-center">
+                      <div className="relative">
+                        <Avatar className="h-10 w-10 mr-3">
+                          {conversation.other_user?.avatar_url ? (
+                            <img src={conversation.other_user.avatar_url} alt={getConversationName(conversation)} />
+                          ) : (
+                            <div className="bg-primary text-primary-foreground h-full w-full flex items-center justify-center font-medium">
+                              {getConversationName(conversation).charAt(0)}
+                            </div>
+                          )}
+                        </Avatar>
+                        {!conversation.is_group && conversation.other_user && (
+                          <div
+                            className={`absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-background ${
+                              isUserOnline(conversation.other_user.id) ? 'bg-green-500' : 'bg-red-500'
+                            }`}
+                          />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-medium">{getConversationName(conversation)}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {conversation.is_group ? 'Group Chat' : 
+                           isUserOnline(conversation.other_user?.id || '') ? 'Online' : 'Offline'}
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </DialogContent>
-              </Dialog>
-            </div>
-          </div>
-          
-          <div className="overflow-y-auto">
-            {conversations.map((conversation) => (
-              <div
-                key={conversation.id}
-                className={`p-4 cursor-pointer hover:bg-muted ${
-                  selectedConversation === conversation.id ? 'bg-muted' : ''
-                }`}
-                onClick={() => setSelectedConversation(conversation.id)}
-              >
-                <div className="flex items-center">
-                  {conversation.is_group ? (
-                    <Users className="h-5 w-5 mr-3 text-muted-foreground" />
-                  ) : (
-                    <div className="h-5 w-5 mr-3 rounded-full bg-primary/20" />
-                  )}
-                  <div>
-                    <p className="font-medium">
-                      {conversation.name || 'Direct Message'}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {conversation.is_group ? 'Group Chat' : 'Direct Message'}
-                    </p>
-                  </div>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </TabsContent>
+
+            <TabsContent value="users" className="flex-1 overflow-y-auto m-0 p-4">
+              <UserSearch onStartChat={startChat} onlineUsers={onlineUsers} />
+            </TabsContent>
+          </Tabs>
         </div>
 
         <div className="flex-1 flex flex-col">
           {selectedConversation ? (
             <>
+              <div className="border-b p-4">
+                <h3 className="font-semibold">
+                  {conversations.find(c => c.id === selectedConversation) && 
+                   getConversationName(conversations.find(c => c.id === selectedConversation)!)}
+                </h3>
+              </div>
+
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${
-                      message.sender_id === user?.id ? 'justify-end' : 'justify-start'
-                    }`}
-                  >
+                {messagesLoading ? (
+                  <div className="flex items-center justify-center h-full">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                  </div>
+                ) : (
+                  messages.map((message) => (
                     <div
-                      className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                        message.sender_id === user?.id
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-muted'
+                      key={message.id}
+                      className={`flex ${
+                        message.sender_id === user?.id ? 'justify-end' : 'justify-start'
                       }`}
                     >
-                      <p>{message.decrypted_content}</p>
-                      <p className="text-xs opacity-70 mt-1">
-                        {new Date(message.created_at).toLocaleTimeString()}
-                      </p>
+                      <div
+                        className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                          message.sender_id === user?.id
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted'
+                        }`}
+                      >
+                        <p>{message.decrypted_content}</p>
+                        <p className="text-xs opacity-70 mt-1">
+                          {new Date(message.created_at).toLocaleTimeString()}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
 
               <div className="border-t p-4">
@@ -341,17 +350,20 @@ const Chat: React.FC = () => {
                     placeholder="Type a message..."
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                   />
-                  <Button onClick={sendMessage}>Send</Button>
+                  <Button onClick={handleSendMessage}>
+                    <Send className="h-4 w-4" />
+                  </Button>
                 </div>
               </div>
             </>
           ) : (
             <div className="flex items-center justify-center h-full">
               <div className="text-center text-muted-foreground">
-                <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <MessageCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>Select a conversation to start messaging</p>
+                <p className="text-sm mt-2">Or switch to Users tab to start a new chat</p>
               </div>
             </div>
           )}
