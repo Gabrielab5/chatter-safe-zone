@@ -4,7 +4,7 @@ import type { UserPresence } from '@/types/userPresence';
 
 export const createPresenceSubscription = (
   userId: string,
-  onPresenceUpdate: (presenceData: UserPresence[]) => void,
+  onPresenceUpdate: React.Dispatch<React.SetStateAction<UserPresence[]>>,
   mountedRef: React.MutableRefObject<boolean>
 ) => {
   const channelName = `user-presence-${userId}-${Date.now()}`;
