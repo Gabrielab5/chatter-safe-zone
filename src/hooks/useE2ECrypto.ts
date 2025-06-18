@@ -209,9 +209,10 @@ export const useE2ECrypto = () => {
     try {
       const exportedPublicKey = await window.crypto.subtle.exportKey("jwk", publicKey);
       
+      // Use type assertion to bypass TypeScript checking for the new public_key column
       const { error } = await supabase
         .from('profiles')
-        .update({ public_key: JSON.stringify(exportedPublicKey) })
+        .update({ public_key: JSON.stringify(exportedPublicKey) } as any)
         .eq('id', userId);
 
       if (error) {
