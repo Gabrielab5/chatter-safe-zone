@@ -18,14 +18,29 @@ export const useUserPresence = () => {
 
     // Set user as online when they connect
     const setUserOnline = async () => {
-      await supabase
-        .from('user_presence')
-        .upsert({
-          user_id: user.id,
-          is_online: true,
-          last_seen: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+      try {
+        // Use upsert with conflict resolution
+        const { error } = await supabase.rpc('upsert_user_presence', {
+          p_user_id: user.id,
+          p_is_online: true,
+          p_last_seen: new Date().toISOString()
         });
+        
+        if (error) {
+          console.log('Setting presence via direct table access...');
+          // Fallback to direct table access if RPC doesn't exist
+          await (supabase as any)
+            .from('user_presence')
+            .upsert({
+              user_id: user.id,
+              is_online: true,
+              last_seen: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+        }
+      } catch (error) {
+        console.error('Error setting user online:', error);
+      }
     };
 
     setUserOnline();
@@ -48,12 +63,18 @@ export const useUserPresence = () => {
 
     // Fetch initial online users
     const fetchOnlineUsers = async () => {
-      const { data } = await supabase
-        .from('user_presence')
-        .select('user_id, is_online, last_seen');
-      
-      if (data) {
-        setOnlineUsers(data);
+      try {
+        const { data, error } = await (supabase as any)
+          .from('user_presence')
+          .select('user_id, is_online, last_seen');
+        
+        if (error) {
+          console.error('Error fetching online users:', error);
+        } else if (data) {
+          setOnlineUsers(data);
+        }
+      } catch (error) {
+        console.error('Error fetching online users:', error);
       }
     };
 
@@ -76,7 +97,7 @@ export const useUserPresence = () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       
       // Set user offline
-      supabase
+      (supabase as any)
         .from('user_presence')
         .update({
           is_online: false,

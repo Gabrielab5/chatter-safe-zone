@@ -11,7 +11,6 @@ interface User {
   id: string;
   email: string;
   full_name: string;
-  display_name: string;
   avatar_url?: string;
 }
 
@@ -44,8 +43,8 @@ const UserSearch: React.FC<UserSearchProps> = ({ onStartChat, onlineUsers }) => 
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, full_name, display_name, avatar_url')
-        .or(`full_name.ilike.%${searchTerm}%,display_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`)
+        .select('id, email, full_name, avatar_url')
+        .or(`full_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`)
         .neq('id', currentUser?.id)
         .limit(20);
 
@@ -63,7 +62,7 @@ const UserSearch: React.FC<UserSearchProps> = ({ onStartChat, onlineUsers }) => 
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, full_name, display_name, avatar_url')
+        .select('id, email, full_name, avatar_url')
         .neq('id', currentUser?.id)
         .limit(50);
 
@@ -107,10 +106,10 @@ const UserSearch: React.FC<UserSearchProps> = ({ onStartChat, onlineUsers }) => 
                 <div className="relative">
                   <Avatar className="h-10 w-10">
                     {user.avatar_url ? (
-                      <img src={user.avatar_url} alt={user.display_name || user.full_name} />
+                      <img src={user.avatar_url} alt={user.full_name || user.email} />
                     ) : (
                       <div className="bg-primary text-primary-foreground h-full w-full flex items-center justify-center font-medium">
-                        {(user.display_name || user.full_name || user.email).charAt(0).toUpperCase()}
+                        {(user.full_name || user.email).charAt(0).toUpperCase()}
                       </div>
                     )}
                   </Avatar>
@@ -121,7 +120,7 @@ const UserSearch: React.FC<UserSearchProps> = ({ onStartChat, onlineUsers }) => 
                   />
                 </div>
                 <div>
-                  <p className="font-medium">{user.display_name || user.full_name}</p>
+                  <p className="font-medium">{user.full_name || 'Unknown User'}</p>
                   <p className="text-sm text-muted-foreground">{user.email}</p>
                   <p className="text-xs text-muted-foreground">
                     {isUserOnline(user.id) ? 'Online' : 'Offline'}
@@ -130,7 +129,7 @@ const UserSearch: React.FC<UserSearchProps> = ({ onStartChat, onlineUsers }) => 
               </div>
               <Button
                 size="sm"
-                onClick={() => onStartChat(user.id, user.display_name || user.full_name)}
+                onClick={() => onStartChat(user.id, user.full_name || user.email)}
               >
                 <MessageCircle className="h-4 w-4 mr-2" />
                 Chat
