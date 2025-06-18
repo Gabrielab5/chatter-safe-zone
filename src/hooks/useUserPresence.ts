@@ -1,3 +1,4 @@
+
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -129,20 +130,23 @@ export const useUserPresence = () => {
       }
     };
 
-    const handleVisibilityChange = () => {
+    const handleVisibilityChange = async () => {
       if (document.hidden) {
-        handleBeforeUnload();
+        await handleBeforeUnload();
       } else if (setupCompleteRef.current) {
         // User returned to tab, set online again
-        supabase
-          .from('user_presence')
-          .upsert({
-            user_id: user.id,
-            is_online: true,
-            last_seen: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .catch(console.error);
+        try {
+          await supabase
+            .from('user_presence')
+            .upsert({
+              user_id: user.id,
+              is_online: true,
+              last_seen: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+        } catch (error) {
+          console.error('Error setting user back online:', error);
+        }
       }
     };
 
