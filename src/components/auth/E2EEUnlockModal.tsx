@@ -42,7 +42,7 @@ const E2EEUnlockModal: React.FC = () => {
 
   return (
     <Dialog open={isUnlockModalOpen} onOpenChange={() => {}}>
-      <DialogContent className="sm:max-w-md" hideClose>
+      <DialogContent className="sm:max-w-md [&>button]:hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Shield className="h-5 w-5 text-primary" />
