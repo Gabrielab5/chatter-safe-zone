@@ -1,9 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { MessageCircle, Send } from 'lucide-react';
+import { MessageCircle, Send, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface Message {
   id: string;
@@ -33,6 +34,7 @@ interface ChatMessagesProps {
   messagesLoading: boolean;
   getConversationName: (conversation: Conversation) => string;
   onSendMessage: (content: string) => Promise<void>;
+  error?: string | null;
 }
 
 const ChatMessages: React.FC<ChatMessagesProps> = ({
@@ -41,19 +43,37 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
   messages,
   messagesLoading,
   getConversationName,
-  onSendMessage
+  onSendMessage,
+  error
 }) => {
   const { user } = useAuth();
   const [newMessage, setNewMessage] = useState('');
+  const [sending, setSending] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || !selectedConversation) return;
+    if (!newMessage.trim() || !selectedConversation || sending) return;
 
+    setSending(true);
     try {
       await onSendMessage(newMessage);
       setNewMessage('');
     } catch (error) {
       console.error('Error sending message:', error);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
     }
   };
 
@@ -78,6 +98,7 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
 
   return (
     <div className="flex-1 flex flex-col">
+      {/* Header */}
       <div className="border-b p-4 bg-background">
         <h3 className="font-semibold">
           {currentConversation ? getConversationName(currentConversation) : 'Chat'}
@@ -89,6 +110,17 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
         )}
       </div>
 
+      {/* Error Alert */}
+      {error && (
+        <div className="p-4">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        </div>
+      )}
+
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messagesLoading ? (
           <div className="flex items-center justify-center h-full">
@@ -106,41 +138,54 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
             </div>
           </div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${
-                message.sender_id === user?.id ? 'justify-end' : 'justify-start'
-              }`}
-            >
+          <>
+            {messages.map((message) => (
               <div
-                className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                  message.sender_id === user?.id
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted'
+                key={message.id}
+                className={`flex ${
+                  message.sender_id === user?.id ? 'justify-end' : 'justify-start'
                 }`}
               >
-                <p className="whitespace-pre-wrap">{message.decrypted_content || message.content_encrypted}</p>
-                <p className="text-xs opacity-70 mt-1">
-                  {new Date(message.created_at).toLocaleTimeString()}
-                </p>
+                <div
+                  className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                    message.sender_id === user?.id
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted'
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap">
+                    {message.decrypted_content || 'Decrypting...'}
+                  </p>
+                  <p className="text-xs opacity-70 mt-1">
+                    {new Date(message.created_at).toLocaleTimeString()}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))
+            ))}
+            <div ref={messagesEndRef} />
+          </>
         )}
       </div>
 
+      {/* Message Input */}
       <div className="border-t p-4 bg-background">
         <div className="flex space-x-2">
           <Input
             placeholder="Type a message..."
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-            disabled={!selectedConversation}
+            onKeyPress={handleKeyPress}
+            disabled={!selectedConversation || sending}
           />
-          <Button onClick={handleSendMessage} disabled={!newMessage.trim() || !selectedConversation}>
-            <Send className="h-4 w-4" />
+          <Button 
+            onClick={handleSendMessage} 
+            disabled={!newMessage.trim() || !selectedConversation || sending}
+          >
+            {sending ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
           </Button>
         </div>
       </div>

@@ -3,10 +3,12 @@ import React, { useState } from 'react';
 import ChatLayout from '@/components/chat/ChatLayout';
 import ChatTabs from '@/components/chat/ChatTabs';
 import ChatMessages from '@/components/chat/ChatMessages';
-import { useToast } from '@/components/ui/use-toast';
+import { useToast } from '@/hooks/use-toast';
 import { useUserPresence } from '@/hooks/useUserPresence';
 import { useRealTimeMessages } from '@/hooks/useRealTimeMessages';
 import { useChatLogic } from '@/hooks/useChatLogic';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AlertCircle } from 'lucide-react';
 
 const Chat: React.FC = () => {
   const { toast } = useToast();
@@ -16,12 +18,18 @@ const Chat: React.FC = () => {
 
   const { 
     conversations, 
-    loading, 
+    loading: conversationsLoading,
+    error: conversationsError,
     startChat, 
     getConversationName 
   } = useChatLogic();
 
-  const { messages, loading: messagesLoading, sendMessage } = useRealTimeMessages(selectedConversation);
+  const { 
+    messages, 
+    loading: messagesLoading, 
+    error: messagesError,
+    sendMessage 
+  } = useRealTimeMessages(selectedConversation);
 
   const handleStartChat = async (userId: string, userName: string) => {
     try {
@@ -29,7 +37,7 @@ const Chat: React.FC = () => {
       setSelectedConversation(conversationId);
       setActiveTab('chats');
     } catch (error) {
-      // Error already handled in startChat
+      console.error('Failed to start chat:', error);
     }
   };
 
@@ -50,7 +58,7 @@ const Chat: React.FC = () => {
     return onlineUsers.some(u => u.user_id === userId && u.is_online);
   };
 
-  if (loading) {
+  if (conversationsLoading) {
     return (
       <ChatLayout>
         <div className="flex items-center justify-center h-full">
@@ -78,14 +86,26 @@ const Chat: React.FC = () => {
           isUserOnline={isUserOnline}
         />
 
-        <ChatMessages
-          selectedConversation={selectedConversation}
-          conversations={conversations}
-          messages={messages}
-          messagesLoading={messagesLoading}
-          getConversationName={getConversationName}
-          onSendMessage={handleSendMessage}
-        />
+        <div className="flex-1 flex flex-col">
+          {conversationsError && (
+            <div className="p-4">
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{conversationsError}</AlertDescription>
+              </Alert>
+            </div>
+          )}
+          
+          <ChatMessages
+            selectedConversation={selectedConversation}
+            conversations={conversations}
+            messages={messages}
+            messagesLoading={messagesLoading}
+            getConversationName={getConversationName}
+            onSendMessage={handleSendMessage}
+            error={messagesError}
+          />
+        </div>
       </div>
     </ChatLayout>
   );

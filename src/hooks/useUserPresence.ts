@@ -13,18 +13,19 @@ export const useUserPresence = () => {
   const [onlineUsers, setOnlineUsers] = useState<UserPresence[]>([]);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<any>(null);
-  const isSetupRef = useRef(false);
+  const setupCompleteRef = useRef(false);
 
   useEffect(() => {
-    if (!user || isSetupRef.current) return;
+    // Prevent multiple setups for the same user
+    if (!user?.id || setupCompleteRef.current) return;
     
-    isSetupRef.current = true;
     console.log('Setting up user presence for user:', user.id);
+    setupCompleteRef.current = true;
 
-    // Set user as online when they connect
-    const setUserOnline = async () => {
+    const setupPresence = async () => {
       try {
-        const { error } = await supabase
+        // Set user as online
+        const { error: upsertError } = await supabase
           .from('user_presence')
           .upsert({
             user_id: user.id,
@@ -33,92 +34,115 @@ export const useUserPresence = () => {
             updated_at: new Date().toISOString()
           });
         
-        if (error) {
-          console.error('Error setting user online:', error);
-        } else {
-          console.log('User set as online');
+        if (upsertError) {
+          console.error('Error setting user online:', upsertError);
+          return;
         }
-      } catch (error) {
-        console.error('Error setting user online:', error);
-      }
-    };
 
-    // Fetch initial online users
-    const fetchOnlineUsers = async () => {
-      try {
-        const { data, error } = await supabase
+        // Fetch initial online users
+        const { data: presenceData, error: fetchError } = await supabase
           .from('user_presence')
           .select('user_id, is_online, last_seen');
         
-        if (error) {
-          console.error('Error fetching online users:', error);
-        } else if (data) {
-          console.log('Online users fetched:', data);
-          setOnlineUsers(data);
+        if (fetchError) {
+          console.error('Error fetching online users:', fetchError);
+        } else if (presenceData) {
+          console.log('Initial online users loaded:', presenceData.length);
+          setOnlineUsers(presenceData);
         }
+
+        // Set up real-time subscription
+        channelRef.current = supabase
+          .channel(`user-presence-${user.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'user_presence'
+            },
+            (payload) => {
+              console.log('Presence update:', payload.eventType);
+              
+              // Update state directly instead of refetching
+              setOnlineUsers(prev => {
+                if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+                  const newData = payload.new as UserPresence;
+                  const existingIndex = prev.findIndex(u => u.user_id === newData.user_id);
+                  
+                  if (existingIndex >= 0) {
+                    // Update existing user
+                    const updated = [...prev];
+                    updated[existingIndex] = newData;
+                    return updated;
+                  } else {
+                    // Add new user
+                    return [...prev, newData];
+                  }
+                } else if (payload.eventType === 'DELETE') {
+                  return prev.filter(u => u.user_id !== payload.old.user_id);
+                }
+                return prev;
+              });
+            }
+          )
+          .subscribe((status) => {
+            console.log('Presence channel status:', status);
+          });
+
+        // Keep user online with heartbeat
+        intervalRef.current = setInterval(async () => {
+          try {
+            await supabase
+              .from('user_presence')
+              .upsert({
+                user_id: user.id,
+                is_online: true,
+                last_seen: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              });
+          } catch (error) {
+            console.error('Heartbeat error:', error);
+          }
+        }, 30000);
+
       } catch (error) {
-        console.error('Error fetching online users:', error);
+        console.error('Error setting up presence:', error);
       }
     };
 
-    setUserOnline();
-    fetchOnlineUsers();
+    setupPresence();
 
-    // Listen for presence updates in real-time (but don't refetch on every update)
-    channelRef.current = supabase
-      .channel('user-presence-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'user_presence'
-        },
-        (payload) => {
-          console.log('User presence update received:', payload);
-          // Update state directly instead of refetching
-          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
-            setOnlineUsers(prev => {
-              const newData = payload.new as UserPresence;
-              const exists = prev.find(u => u.user_id === newData.user_id);
-              if (exists) {
-                return prev.map(u => u.user_id === newData.user_id ? newData : u);
-              } else {
-                return [...prev, newData];
-              }
-            });
-          } else if (payload.eventType === 'DELETE') {
-            setOnlineUsers(prev => prev.filter(u => u.user_id !== payload.old.user_id));
-          }
-        }
-      )
-      .subscribe((status) => {
-        console.log('User presence channel status:', status);
-      });
-
-    // Update presence every 30 seconds to keep user online
-    intervalRef.current = setInterval(() => {
-      setUserOnline();
-    }, 30000);
-
-    // Set user offline when they disconnect/close tab
+    // Set user offline on page unload
     const handleBeforeUnload = async () => {
-      await supabase
-        .from('user_presence')
-        .update({
-          is_online: false,
-          last_seen: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', user.id);
+      try {
+        await supabase
+          .from('user_presence')
+          .update({
+            is_online: false,
+            last_seen: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('user_id', user.id);
+      } catch (error) {
+        console.error('Error setting user offline:', error);
+      }
     };
 
-    // Set user offline when page is hidden (tab switching, minimizing)
     const handleVisibilityChange = () => {
       if (document.hidden) {
         handleBeforeUnload();
-      } else {
-        setUserOnline();
+      } else if (setupCompleteRef.current) {
+        // User returned to tab, set online again
+        supabase
+          .from('user_presence')
+          .upsert({
+            user_id: user.id,
+            is_online: true,
+            last_seen: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .catch(console.error);
       }
     };
 
@@ -126,23 +150,25 @@ export const useUserPresence = () => {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      isSetupRef.current = false;
+      setupCompleteRef.current = false;
       
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
       
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       
       // Set user offline and cleanup
-      handleBeforeUnload().then(() => {
+      handleBeforeUnload().finally(() => {
         if (channelRef.current) {
           supabase.removeChannel(channelRef.current);
+          channelRef.current = null;
         }
       });
     };
-  }, [user?.id]); // Only depend on user.id to prevent multiple setups
+  }, [user?.id]);
 
   return { onlineUsers };
 };
