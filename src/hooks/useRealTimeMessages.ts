@@ -208,7 +208,7 @@ export const useRealTimeMessages = (conversationId: string | null) => {
       .subscribe((status) => {
         console.log(`Messages channel status for ${conversationId}:`, status);
         
-        if (status === 'SUBSCRIPTION_ERROR') {
+        if (status === 'CHANNEL_ERROR') {
           console.error('Message subscription error');
           setError('Connection lost. Messages may not update in real-time.');
         } else if (status === 'SUBSCRIBED') {

@@ -120,7 +120,7 @@ export const useUserPresence = () => {
           )
           .subscribe((status) => {
             console.log('Presence channel status:', status);
-            if (status === 'SUBSCRIPTION_ERROR') {
+            if (status === 'CHANNEL_ERROR') {
               console.error('Subscription error, attempting reconnect...');
               // Attempt to resubscribe after a delay
               setTimeout(() => {

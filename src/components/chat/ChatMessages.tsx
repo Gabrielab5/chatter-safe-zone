@@ -151,10 +151,14 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
             <h3 className="font-semibold flex items-center gap-2">
               {currentConversation ? getConversationName(currentConversation) : 'Chat'}
               {connectionStatus === 'offline' && (
-                <WifiOff className="h-4 w-4 text-red-500" title="Offline" />
+                <span title="Offline">
+                  <WifiOff className="h-4 w-4 text-red-500" />
+                </span>
               )}
               {connectionStatus === 'online' && (
-                <Wifi className="h-4 w-4 text-green-500" title="Online" />
+                <span title="Online">
+                  <Wifi className="h-4 w-4 text-green-500" />
+                </span>
               )}
             </h3>
             {currentConversation && !currentConversation.is_group && currentConversation.other_user && (
