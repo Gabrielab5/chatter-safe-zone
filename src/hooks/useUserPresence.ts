@@ -52,28 +52,14 @@ export const useUserPresence = () => {
     if (!user?.id || isCleaningUpRef.current) return;
     
     try {
-      // Use navigator.sendBeacon for more reliable offline updates
-      const data = JSON.stringify({
-        user_id: user.id,
-        is_online: false,
-        last_seen: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      });
-      
-      // Try beacon first, fallback to regular update
-      const beaconSent = navigator.sendBeacon && 
-        navigator.sendBeacon('/api/user-offline', data);
-      
-      if (!beaconSent) {
-        await supabase
-          .from('user_presence')
-          .update({
-            is_online: false,
-            last_seen: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .eq('user_id', user.id);
-      }
+      await supabase
+        .from('user_presence')
+        .update({
+          is_online: false,
+          last_seen: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('user_id', user.id);
       
       console.log('User presence set as offline');
     } catch (error) {
@@ -130,12 +116,14 @@ export const useUserPresence = () => {
             (payload) => {
               if (!mountedRef.current) return;
               
-              console.log('Presence update:', payload.eventType, payload.new?.user_id);
+              console.log('Presence update:', payload.eventType, payload.new);
               
               // Optimized state updates to prevent excessive re-renders
               setOnlineUsers(prev => {
                 if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
                   const newData = payload.new as UserPresence;
+                  if (!newData?.user_id) return prev;
+                  
                   const existingIndex = prev.findIndex(u => u.user_id === newData.user_id);
                   
                   if (existingIndex >= 0) {
@@ -151,7 +139,10 @@ export const useUserPresence = () => {
                     return [...prev, newData];
                   }
                 } else if (payload.eventType === 'DELETE') {
-                  return prev.filter(u => u.user_id !== payload.old?.user_id);
+                  const oldData = payload.old as { user_id?: string };
+                  if (oldData?.user_id) {
+                    return prev.filter(u => u.user_id !== oldData.user_id);
+                  }
                 }
                 return prev;
               });
