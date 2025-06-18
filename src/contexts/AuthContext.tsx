@@ -1,7 +1,9 @@
+
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { logLoginAttempt, logRegistration, logGoogleAuth, logLogout } from '@/utils/auditLogger';
+import { useE2ECrypto } from '@/hooks/useE2ECrypto';
 
 interface AuthContextType {
   user: User | null;
@@ -12,6 +14,8 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<{ error: any }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: any }>;
+  initializeE2EE: (password: string) => Promise<{ error: any }>;
+  hasE2EEKeys: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -28,42 +32,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasE2EEKeys, setHasE2EEKeys] = useState(false);
+  
+  const { generateAndStoreKeys, hasExistingKeys } = useE2ECrypto();
 
   useEffect(() => {
     console.log('AuthProvider: Setting up auth listener');
     
     // Set up auth state listener first
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
         console.log('Auth state changed:', event, session?.user?.email);
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
 
-        // Log successful Google auth
+        // Check for E2EE keys when user signs in
         if (event === 'SIGNED_IN' && session?.user) {
+          const hasKeys = await hasExistingKeys(session.user.id);
+          setHasE2EEKeys(hasKeys);
+          
           const provider = session.user.app_metadata?.provider;
           if (provider === 'google') {
             console.log('Google auth successful, logging event');
             logGoogleAuth(true);
           }
+        } else if (event === 'SIGNED_OUT') {
+          setHasE2EEKeys(false);
         }
       }
     );
 
     // Then get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       console.log('Initial session:', session?.user?.email);
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      
+      // Check for E2EE keys on initial load
+      if (session?.user) {
+        const hasKeys = await hasExistingKeys(session.user.id);
+        setHasE2EEKeys(hasKeys);
+      }
     });
 
     return () => {
       console.log('AuthProvider: Cleaning up auth listener');
       subscription.unsubscribe();
     };
-  }, []);
+  }, [hasExistingKeys]);
 
   const signUp = async (email: string, password: string, fullName: string) => {
     console.log('Attempting to sign up user:', email);
@@ -168,6 +186,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { error };
   };
 
+  const initializeE2EE = async (password: string) => {
+    if (!user) {
+      return { error: new Error('User not authenticated') };
+    }
+
+    try {
+      await generateAndStoreKeys(user.id, password);
+      setHasE2EEKeys(true);
+      return { error: null };
+    } catch (error: any) {
+      console.error('E2EE initialization failed:', error);
+      return { error };
+    }
+  };
+
   const value = {
     user,
     session,
@@ -177,6 +210,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signInWithGoogle,
     signOut,
     resetPassword,
+    initializeE2EE,
+    hasE2EEKeys,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

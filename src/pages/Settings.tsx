@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Shield, User, Eye } from 'lucide-react';
 import MFASettings from '@/components/auth/MFASettings';
 import AuditLogs from '@/components/admin/AuditLogs';
+import E2EESetup from '@/components/auth/E2EESetup';
 import ChatLayout from '@/components/chat/ChatLayout';
 
 const Settings: React.FC = () => {
@@ -30,7 +31,8 @@ const Settings: React.FC = () => {
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="security" className="mt-6">
+            <TabsContent value="security" className="mt-6 space-y-6">
+              <E2EESetup />
               <MFASettings />
             </TabsContent>
 
