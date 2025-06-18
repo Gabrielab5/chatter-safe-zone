@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useE2ECrypto } from '@/hooks/useE2ECrypto';
-import { useE2EESession } from '@/hooks/useE2EESession';
+import { useE2EESessionManager } from '@/hooks/useE2EESessionManager';
 import { fetchPublicKey } from '@/utils/publicKeyManager';
 
 interface Message {
@@ -19,7 +19,7 @@ interface Message {
 export const useRealTimeMessages = (conversationId: string | null) => {
   const { user } = useAuth();
   const { encryptMessage, decryptMessage } = useE2ECrypto();
-  const { getSessionPassword } = useE2EESession();
+  const { getSessionPassword, PasswordModal } = useE2EESessionManager();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,11 +46,11 @@ export const useRealTimeMessages = (conversationId: string | null) => {
     if (!user?.id || !mountedRef.current) return message;
 
     try {
-      const password = getSessionPassword();
+      const password = await getSessionPassword();
       if (!password) {
         return {
           ...message,
-          decrypted_content: '🔒 Password required to decrypt'
+          decrypted_content: '🔒 Click to unlock messages'
         };
       }
 
@@ -378,6 +378,7 @@ export const useRealTimeMessages = (conversationId: string | null) => {
     loading, 
     error,
     sendMessage, 
-    refetch: fetchMessages 
+    refetch: fetchMessages,
+    PasswordModal
   };
 };

@@ -12,18 +12,11 @@ export const useE2EESession = () => {
     isUnlocked: false
   });
 
-  const promptForPassword = useCallback((): string | null => {
-    // Simple prompt for now - this can be enhanced with a modal later
-    const password = prompt('Enter your E2EE password to decrypt messages:');
-    
-    if (password) {
-      setSession({
-        password,
-        isUnlocked: true
-      });
-    }
-    
-    return password;
+  const setSessionPassword = useCallback((password: string) => {
+    setSession({
+      password,
+      isUnlocked: true
+    });
   }, []);
 
   const getSessionPassword = useCallback((): string | null => {
@@ -31,8 +24,10 @@ export const useE2EESession = () => {
       return session.password;
     }
     
-    return promptForPassword();
-  }, [session, promptForPassword]);
+    // Return null if no password is available - the calling component
+    // should handle prompting for the password
+    return null;
+  }, [session]);
 
   const clearSession = useCallback(() => {
     setSession({
@@ -43,6 +38,7 @@ export const useE2EESession = () => {
 
   return {
     session,
+    setSessionPassword,
     getSessionPassword,
     clearSession,
     isUnlocked: session.isUnlocked

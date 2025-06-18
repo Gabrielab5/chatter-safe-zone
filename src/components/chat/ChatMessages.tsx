@@ -35,6 +35,7 @@ interface ChatMessagesProps {
   getConversationName: (conversation: Conversation) => string;
   onSendMessage: (content: string) => Promise<void>;
   error?: string | null;
+  PasswordModal?: React.ComponentType;
 }
 
 const ChatMessages: React.FC<ChatMessagesProps> = ({
@@ -44,7 +45,8 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
   messagesLoading,
   getConversationName,
   onSendMessage,
-  error
+  error,
+  PasswordModal
 }) => {
   const { user } = useAuth();
   const [newMessage, setNewMessage] = useState('');
@@ -136,6 +138,7 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
             </div>
           </div>
         </div>
+        {PasswordModal && <PasswordModal />}
       </div>
     );
   }
@@ -144,6 +147,8 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
 
   return (
     <div className="flex-1 flex flex-col h-full">
+      {PasswordModal && <PasswordModal />}
+      
       {/* Enhanced Header with Connection Status */}
       <div className="border-b p-4 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center justify-between">
