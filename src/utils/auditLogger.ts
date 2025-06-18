@@ -10,20 +10,22 @@ export interface AuditEvent {
 
 export const logAuthEvent = async (event: AuditEvent) => {
   try {
-    // Get user's IP address (in a real app, you'd get this from server)
-    const ipAddress = event.ipAddress || 'unknown';
-    
     // Get user agent
     const userAgent = event.userAgent || navigator.userAgent;
     
-    await supabase.functions.invoke('audit-logs', {
+    // Use the updated function invocation format
+    const { data, error } = await supabase.functions.invoke('audit-logs', {
       body: {
         event_type: event.eventType,
         event_data: event.eventData,
-        ip_address: ipAddress,
+        ip_address: event.ipAddress || 'unknown',
         user_agent: userAgent
       }
     });
+
+    if (error) {
+      console.error('Audit logging error:', error);
+    }
   } catch (error) {
     console.error('Failed to log audit event:', error);
   }

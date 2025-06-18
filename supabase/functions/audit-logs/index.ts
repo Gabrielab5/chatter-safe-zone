@@ -13,24 +13,40 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 );
 
-// Check if user is admin (you can modify this logic based on your admin system)
-async function isAdmin(userId: string): Promise<boolean> {
-  // For now, check if user email contains 'admin' - replace with your admin logic
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('email')
-    .eq('id', userId)
-    .single();
-  
-  return profile?.email?.includes('admin') || false;
-}
-
 serve(async (req) => {
+  console.log('Audit logs function called:', req.method);
+  
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // For POST requests (logging events), we don't need authentication
+    if (req.method === 'POST') {
+      const body = await req.json();
+      console.log('Logging audit event:', body);
+      
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .insert({
+          event_type: body.event_type,
+          event_data: body.event_data,
+          ip_address: body.ip_address,
+          user_agent: body.user_agent,
+          user_id: null // We'll set this later when we have user context
+        });
+
+      if (error) {
+        console.error('Database insert error:', error);
+        throw error;
+      }
+
+      return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // For GET requests (viewing logs), require authentication
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       throw new Error('No authorization header');
@@ -43,8 +59,8 @@ serve(async (req) => {
       throw new Error('Invalid authentication');
     }
 
-    // Check if user is admin
-    const adminCheck = await isAdmin(user.id);
+    // Check if user is admin (simplified check)
+    const adminCheck = user.email?.includes('admin') || false;
     if (!adminCheck) {
       throw new Error('Unauthorized: Admin access required');
     }

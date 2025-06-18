@@ -35,11 +35,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     
     // Set up auth state listener first
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
         console.log('Auth state changed:', event, session?.user?.email);
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+
+        // Log successful Google auth
+        if (event === 'SIGNED_IN' && session?.user) {
+          const provider = session.user.app_metadata?.provider;
+          if (provider === 'google') {
+            console.log('Google auth successful, logging event');
+            logGoogleAuth(true);
+          }
+        }
       }
     );
 
@@ -67,7 +76,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         options: {
           data: {
             full_name: fullName,
-          }
+          },
+          emailRedirectTo: `${window.location.origin}/chat`
         }
       });
       
@@ -119,8 +129,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       console.log('Google sign in result:', { data, error });
       
-      // Log the Google auth attempt
-      logGoogleAuth(!error, error?.message);
+      // Note: We'll log the success in the auth state change handler
+      if (error) {
+        logGoogleAuth(false, error.message);
+      }
       
       return { error };
     } catch (error: any) {
