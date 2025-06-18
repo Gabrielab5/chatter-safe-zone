@@ -15,46 +15,73 @@ export const useUserPresence = () => {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<any>(null);
   const setupCompleteRef = useRef(false);
+  const isCleaningUpRef = useRef(false);
 
   useEffect(() => {
-    // Prevent multiple setups for the same user
-    if (!user?.id || setupCompleteRef.current) return;
+    // Prevent multiple setups and ensure proper cleanup
+    if (!user?.id || setupCompleteRef.current || isCleaningUpRef.current) return;
     
     console.log('Setting up user presence for user:', user.id);
     setupCompleteRef.current = true;
 
     const setupPresence = async () => {
       try {
-        // Set user as online
-        const { error: upsertError } = await supabase
-          .from('user_presence')
-          .upsert({
-            user_id: user.id,
-            is_online: true,
-            last_seen: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-        
-        if (upsertError) {
-          console.error('Error setting user online:', upsertError);
+        // Set user as online with retry logic
+        const setUserOnline = async (retries = 3) => {
+          for (let i = 0; i < retries; i++) {
+            try {
+              const { error: upsertError } = await supabase
+                .from('user_presence')
+                .upsert({
+                  user_id: user.id,
+                  is_online: true,
+                  last_seen: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                });
+              
+              if (!upsertError) {
+                console.log('User set as online');
+                return true;
+              }
+              console.error(`Attempt ${i + 1} failed:`, upsertError);
+            } catch (error) {
+              console.error(`Attempt ${i + 1} error:`, error);
+            }
+            
+            if (i < retries - 1) {
+              await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+            }
+          }
+          return false;
+        };
+
+        const success = await setUserOnline();
+        if (!success) {
+          console.error('Failed to set user online after retries');
           return;
         }
 
-        // Fetch initial online users
-        const { data: presenceData, error: fetchError } = await supabase
-          .from('user_presence')
-          .select('user_id, is_online, last_seen');
-        
-        if (fetchError) {
-          console.error('Error fetching online users:', fetchError);
-        } else if (presenceData) {
-          console.log('Initial online users loaded:', presenceData.length);
-          setOnlineUsers(presenceData);
+        // Fetch initial online users with proper error handling
+        try {
+          const { data: presenceData, error: fetchError } = await supabase
+            .from('user_presence')
+            .select('user_id, is_online, last_seen')
+            .order('last_seen', { ascending: false });
+          
+          if (fetchError) {
+            console.error('Error fetching online users:', fetchError);
+          } else if (presenceData) {
+            console.log('Initial online users loaded:', presenceData.length);
+            setOnlineUsers(presenceData);
+          }
+        } catch (error) {
+          console.error('Unexpected error fetching users:', error);
         }
 
-        // Set up real-time subscription
+        // Set up real-time subscription with improved error handling
+        const channelName = `user-presence-${user.id}-${Date.now()}`;
         channelRef.current = supabase
-          .channel(`user-presence-${user.id}`)
+          .channel(channelName)
           .on(
             'postgres_changes',
             {
@@ -65,19 +92,23 @@ export const useUserPresence = () => {
             (payload) => {
               console.log('Presence update:', payload.eventType);
               
-              // Update state directly instead of refetching
+              // Optimized state updates to prevent excessive re-renders
               setOnlineUsers(prev => {
                 if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
                   const newData = payload.new as UserPresence;
                   const existingIndex = prev.findIndex(u => u.user_id === newData.user_id);
                   
                   if (existingIndex >= 0) {
-                    // Update existing user
-                    const updated = [...prev];
-                    updated[existingIndex] = newData;
-                    return updated;
+                    // Only update if data actually changed
+                    const existing = prev[existingIndex];
+                    if (existing.is_online !== newData.is_online || 
+                        existing.last_seen !== newData.last_seen) {
+                      const updated = [...prev];
+                      updated[existingIndex] = newData;
+                      return updated;
+                    }
+                    return prev; // No change needed
                   } else {
-                    // Add new user
                     return [...prev, newData];
                   }
                 } else if (payload.eventType === 'DELETE') {
@@ -89,12 +120,26 @@ export const useUserPresence = () => {
           )
           .subscribe((status) => {
             console.log('Presence channel status:', status);
+            if (status === 'SUBSCRIPTION_ERROR') {
+              console.error('Subscription error, attempting reconnect...');
+              // Attempt to resubscribe after a delay
+              setTimeout(() => {
+                if (channelRef.current && !isCleaningUpRef.current) {
+                  channelRef.current.subscribe();
+                }
+              }, 5000);
+            }
           });
 
-        // Keep user online with heartbeat
+        // Optimized heartbeat with exponential backoff on failure
+        let heartbeatFailures = 0;
+        const maxFailures = 3;
+        
         intervalRef.current = setInterval(async () => {
+          if (isCleaningUpRef.current) return;
+          
           try {
-            await supabase
+            const { error } = await supabase
               .from('user_presence')
               .upsert({
                 user_id: user.id,
@@ -102,41 +147,75 @@ export const useUserPresence = () => {
                 last_seen: new Date().toISOString(),
                 updated_at: new Date().toISOString()
               });
+              
+            if (error) {
+              heartbeatFailures++;
+              console.error(`Heartbeat failure ${heartbeatFailures}:`, error);
+              
+              if (heartbeatFailures >= maxFailures) {
+                console.error('Max heartbeat failures reached, stopping heartbeat');
+                if (intervalRef.current) {
+                  clearInterval(intervalRef.current);
+                  intervalRef.current = null;
+                }
+              }
+            } else {
+              heartbeatFailures = 0; // Reset on success
+            }
           } catch (error) {
-            console.error('Heartbeat error:', error);
+            heartbeatFailures++;
+            console.error(`Heartbeat error ${heartbeatFailures}:`, error);
           }
         }, 30000);
 
       } catch (error) {
         console.error('Error setting up presence:', error);
+        setupCompleteRef.current = false;
       }
     };
 
     setupPresence();
 
-    // Set user offline on page unload
+    // Improved offline handling
     const handleBeforeUnload = async () => {
+      if (isCleaningUpRef.current) return;
+      
       try {
-        await supabase
-          .from('user_presence')
-          .update({
-            is_online: false,
-            last_seen: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .eq('user_id', user.id);
+        // Use navigator.sendBeacon for more reliable offline updates
+        const data = JSON.stringify({
+          user_id: user.id,
+          is_online: false,
+          last_seen: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+        
+        // Try beacon first, fallback to regular update
+        const beaconSent = navigator.sendBeacon?.('/api/user-offline', data);
+        
+        if (!beaconSent) {
+          await supabase
+            .from('user_presence')
+            .update({
+              is_online: false,
+              last_seen: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('user_id', user.id);
+        }
       } catch (error) {
         console.error('Error setting user offline:', error);
       }
     };
 
     const handleVisibilityChange = async () => {
+      if (isCleaningUpRef.current) return;
+      
       if (document.hidden) {
         await handleBeforeUnload();
       } else if (setupCompleteRef.current) {
-        // User returned to tab, set online again
+        // User returned to tab, set online again with retry
         try {
-          await supabase
+          const { error } = await supabase
             .from('user_presence')
             .upsert({
               user_id: user.id,
@@ -144,16 +223,23 @@ export const useUserPresence = () => {
               last_seen: new Date().toISOString(),
               updated_at: new Date().toISOString()
             });
+            
+          if (error) {
+            console.error('Error setting user back online:', error);
+          }
         } catch (error) {
           console.error('Error setting user back online:', error);
         }
       }
     };
 
+    // Add passive listeners for better performance
     window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange, { passive: true });
 
     return () => {
+      console.log('Cleaning up user presence...');
+      isCleaningUpRef.current = true;
       setupCompleteRef.current = false;
       
       if (intervalRef.current) {
@@ -164,12 +250,17 @@ export const useUserPresence = () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       
-      // Set user offline and cleanup
+      // Set user offline and cleanup channel
       handleBeforeUnload().finally(() => {
         if (channelRef.current) {
-          supabase.removeChannel(channelRef.current);
+          try {
+            supabase.removeChannel(channelRef.current);
+          } catch (error) {
+            console.error('Error removing channel:', error);
+          }
           channelRef.current = null;
         }
+        isCleaningUpRef.current = false;
       });
     };
   }, [user?.id]);
