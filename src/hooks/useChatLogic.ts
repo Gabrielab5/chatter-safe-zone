@@ -24,14 +24,18 @@ export const useChatLogic = () => {
   const [error, setError] = useState<string | null>(null);
 
   const fetchConversations = useCallback(async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setConversations([]);
+      setLoading(false);
+      return;
+    }
 
     try {
       console.log('Fetching conversations for user:', user.id);
       setLoading(true);
       setError(null);
 
-      // Get conversation IDs for this user
+      // Get conversation IDs for this user with improved error handling
       const { data: participantData, error: participantError } = await supabase
         .from('conversation_participants')
         .select('conversation_id')
@@ -39,7 +43,23 @@ export const useChatLogic = () => {
 
       if (participantError) {
         console.error('Error fetching participants:', participantError);
-        setError('Failed to load conversations');
+        
+        // Check if it's an RLS error
+        if (participantError.code === 'PGRST301' || participantError.message?.includes('row-level security')) {
+          setError('Authentication required to access conversations');
+          toast({
+            title: "Authentication Error",
+            description: "Please log out and log back in to access your conversations",
+            variant: "destructive"
+          });
+        } else {
+          setError('Failed to load conversations');
+          toast({
+            title: "Error",
+            description: "Failed to load conversations. Please check your connection.",
+            variant: "destructive"
+          });
+        }
         return;
       }
 
@@ -52,7 +72,7 @@ export const useChatLogic = () => {
       const conversationIds = participantData.map(p => p.conversation_id);
       console.log('Found conversation IDs:', conversationIds);
 
-      // Get conversation details
+      // Get conversation details with better error handling
       const { data: conversationData, error: conversationError } = await supabase
         .from('conversations')
         .select('id, name, is_group, created_at')
@@ -61,12 +81,17 @@ export const useChatLogic = () => {
 
       if (conversationError) {
         console.error('Error fetching conversations:', conversationError);
-        setError('Failed to load conversations');
+        setError('Failed to load conversation details');
+        toast({
+          title: "Error",
+          description: "Failed to load conversation details",
+          variant: "destructive"
+        });
         return;
       }
 
-      // Get other participants for direct messages
-      const enrichedConversations = await Promise.all(
+      // Get other participants for direct messages with timeout protection
+      const enrichedConversations = await Promise.allSettled(
         (conversationData || []).map(async (conversation) => {
           try {
             if (conversation.is_group) {
@@ -78,16 +103,25 @@ export const useChatLogic = () => {
               };
             }
 
-            // For direct messages, get the other participant
-            const { data: otherParticipants, error: participantsError } = await supabase
+            // For direct messages, get the other participant with timeout
+            const participantPromise = supabase
               .from('conversation_participants')
               .select('user_id')
               .eq('conversation_id', conversation.id)
               .neq('user_id', user.id)
               .limit(1);
 
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Timeout')), 5000)
+            );
+
+            const { data: otherParticipants, error: participantsError } = await Promise.race([
+              participantPromise,
+              timeoutPromise
+            ]) as any;
+
             if (participantsError || !otherParticipants || otherParticipants.length === 0) {
-              console.error('Error fetching other participants:', participantsError);
+              console.warn('Could not fetch other participants for conversation:', conversation.id);
               return {
                 id: conversation.id,
                 name: conversation.name,
@@ -96,12 +130,17 @@ export const useChatLogic = () => {
               };
             }
 
-            // Get profile info for the other user
-            const { data: profile, error: profileError } = await supabase
+            // Get profile info for the other user with timeout
+            const profilePromise = supabase
               .from('profiles')
               .select('id, full_name, avatar_url')
               .eq('id', otherParticipants[0].user_id)
               .single();
+
+            const { data: profile, error: profileError } = await Promise.race([
+              profilePromise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Profile timeout')), 3000))
+            ]) as any;
 
             let otherUser = null;
             if (!profileError && profile) {
@@ -131,15 +170,26 @@ export const useChatLogic = () => {
         })
       );
 
-      console.log('Loaded conversations:', enrichedConversations.length);
-      setConversations(enrichedConversations);
+      // Filter successful results
+      const validConversations = enrichedConversations
+        .filter(result => result.status === 'fulfilled')
+        .map(result => (result as PromiseFulfilledResult<any>).value);
+
+      console.log('Loaded conversations:', validConversations.length);
+      setConversations(validConversations);
+
+      // Log any failed enrichments
+      const failedCount = enrichedConversations.filter(result => result.status === 'rejected').length;
+      if (failedCount > 0) {
+        console.warn(`Failed to enrich ${failedCount} conversations`);
+      }
 
     } catch (error) {
       console.error('Error in fetchConversations:', error);
       setError('Failed to load conversations');
       toast({
         title: "Error",
-        description: "Failed to load conversations",
+        description: "An unexpected error occurred while loading conversations",
         variant: "destructive"
       });
     } finally {
@@ -159,20 +209,30 @@ export const useChatLogic = () => {
     try {
       console.log('Starting chat with user:', userId);
 
-      // Check if conversation already exists
-      const { data: existingParticipants } = await supabase
+      // Check if conversation already exists with improved logic
+      const { data: existingParticipants, error: searchError } = await supabase
         .from('conversation_participants')
         .select('conversation_id')
         .eq('user_id', user.id);
 
+      if (searchError) {
+        console.error('Error searching for existing conversations:', searchError);
+        throw new Error('Failed to check for existing conversations');
+      }
+
       if (existingParticipants) {
         for (const participant of existingParticipants) {
-          const { data: otherParticipant } = await supabase
+          const { data: otherParticipant, error: checkError } = await supabase
             .from('conversation_participants')
             .select('user_id')
             .eq('conversation_id', participant.conversation_id)
             .eq('user_id', userId)
-            .single();
+            .maybeSingle();
+
+          if (checkError) {
+            console.warn('Error checking participant:', checkError);
+            continue;
+          }
 
           if (otherParticipant) {
             console.log('Existing conversation found:', participant.conversation_id);
@@ -183,7 +243,7 @@ export const useChatLogic = () => {
 
       console.log('Creating new conversation...');
       
-      // Create new conversation
+      // Create new conversation with better error handling
       const { data: conversation, error: convError } = await supabase
         .from('conversations')
         .insert({
@@ -197,10 +257,10 @@ export const useChatLogic = () => {
 
       if (convError) {
         console.error('Error creating conversation:', convError);
-        throw convError;
+        throw new Error('Failed to create conversation');
       }
 
-      // Add participants
+      // Add participants with transaction-like behavior
       const { error: participantError } = await supabase
         .from('conversation_participants')
         .insert([
@@ -216,7 +276,14 @@ export const useChatLogic = () => {
 
       if (participantError) {
         console.error('Error adding participants:', participantError);
-        throw participantError;
+        
+        // Attempt cleanup of orphaned conversation
+        await supabase
+          .from('conversations')
+          .delete()
+          .eq('id', conversation.id);
+          
+        throw new Error('Failed to add participants to conversation');
       }
 
       console.log('New conversation created:', conversation.id);
@@ -235,7 +302,7 @@ export const useChatLogic = () => {
       console.error('Error starting chat:', error);
       toast({
         title: "Error",
-        description: "Failed to start chat",
+        description: error instanceof Error ? error.message : "Failed to start chat",
         variant: "destructive"
       });
       throw error;
