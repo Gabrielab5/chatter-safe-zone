@@ -25,7 +25,7 @@ export const useE2ECrypto = () => {
       // Encrypt private key with password
       const { encryptedKey, salt } = await encryptPrivateKey(keyPair.privateKey, password);
       
-      // Store keys locally
+      // Store keys locally using the robust storage utility
       const keyData: StoredKeyData = {
         encryptedPrivateKey: encryptedKey,
         publicKeyJWK,
