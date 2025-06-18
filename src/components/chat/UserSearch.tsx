@@ -31,6 +31,10 @@ const UserSearch: React.FC<UserSearchProps> = ({ onStartChat, onlineUsers }) => 
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    fetchAllUsers();
+  }, []);
+
+  useEffect(() => {
     if (searchTerm.trim()) {
       searchUsers();
     } else {
@@ -46,7 +50,7 @@ const UserSearch: React.FC<UserSearchProps> = ({ onStartChat, onlineUsers }) => 
         .select('id, email, full_name, avatar_url')
         .or(`full_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`)
         .neq('id', currentUser?.id)
-        .limit(20);
+        .limit(50);
 
       if (error) throw error;
       setUsers(data || []);
@@ -64,7 +68,8 @@ const UserSearch: React.FC<UserSearchProps> = ({ onStartChat, onlineUsers }) => 
         .from('profiles')
         .select('id, email, full_name, avatar_url')
         .neq('id', currentUser?.id)
-        .limit(50);
+        .order('full_name', { ascending: true })
+        .limit(100);
 
       if (error) throw error;
       setUsers(data || []);
@@ -79,8 +84,22 @@ const UserSearch: React.FC<UserSearchProps> = ({ onStartChat, onlineUsers }) => 
     return onlineUsers.some(u => u.user_id === userId && u.is_online);
   };
 
-  const onlineUsersList = users.filter(user => isUserOnline(user.id));
-  const offlineUsersList = users.filter(user => !isUserOnline(user.id));
+  // Sort users: online users first, then offline users
+  const sortedUsers = [...users].sort((a, b) => {
+    const aOnline = isUserOnline(a.id);
+    const bOnline = isUserOnline(b.id);
+    
+    if (aOnline && !bOnline) return -1;
+    if (!aOnline && bOnline) return 1;
+    
+    // If both have same online status, sort by name
+    const aName = a.full_name || a.email;
+    const bName = b.full_name || b.email;
+    return aName.localeCompare(bName);
+  });
+
+  const onlineUsersList = sortedUsers.filter(user => isUserOnline(user.id));
+  const offlineUsersList = sortedUsers.filter(user => !isUserOnline(user.id));
 
   return (
     <div className="space-y-4">
@@ -98,7 +117,7 @@ const UserSearch: React.FC<UserSearchProps> = ({ onStartChat, onlineUsers }) => 
         {loading ? (
           <div className="text-center py-4">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto mb-2"></div>
-            <p className="text-sm text-muted-foreground">Searching users...</p>
+            <p className="text-sm text-muted-foreground">Loading users...</p>
           </div>
         ) : users.length > 0 ? (
           <>
@@ -144,7 +163,9 @@ const UserSearch: React.FC<UserSearchProps> = ({ onStartChat, onlineUsers }) => 
           <div className="text-center py-8 text-muted-foreground">
             <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
             <p className="font-medium mb-2">No users found</p>
-            <p className="text-sm">Try a different search term or check back later</p>
+            <p className="text-sm">
+              {searchTerm ? 'Try a different search term' : 'No users available'}
+            </p>
           </div>
         )}
       </div>

@@ -32,45 +32,40 @@ export const useChatLogic = () => {
     try {
       console.log('Fetching conversations for user:', user?.id);
       
-      const { data, error } = await supabase
+      // First get conversation IDs for this user
+      const { data: participantData, error: participantError } = await supabase
         .from('conversation_participants')
-        .select(`
-          conversation_id,
-          conversations (
-            id,
-            name,
-            is_group,
-            created_at
-          )
-        `)
+        .select('conversation_id')
         .eq('user_id', user?.id);
 
-      if (error) {
-        console.error('Error fetching conversations:', error);
-        if (error.message.includes('infinite recursion')) {
-          toast({
-            title: "Database Error",
-            description: "There's a configuration issue. Please contact support.",
-            variant: "destructive"
-          });
-        } else {
-          throw error;
-        }
-        return;
+      if (participantError) {
+        console.error('Error fetching conversation participants:', participantError);
+        throw participantError;
       }
 
-      // Handle empty conversations gracefully
-      if (!data || data.length === 0) {
+      if (!participantData || participantData.length === 0) {
         console.log('No conversations found for user');
         setConversations([]);
         setLoading(false);
         return;
       }
 
-      // Fetch conversation details with other participants
+      const conversationIds = participantData.map(p => p.conversation_id);
+
+      // Then get conversation details
+      const { data: conversationData, error: conversationError } = await supabase
+        .from('conversations')
+        .select('id, name, is_group, created_at')
+        .in('id', conversationIds);
+
+      if (conversationError) {
+        console.error('Error fetching conversations:', conversationError);
+        throw conversationError;
+      }
+
+      // Get conversation details with other participants
       const conversationsData = await Promise.all(
-        data.map(async (item: any) => {
-          const conversation = item.conversations;
+        (conversationData || []).map(async (conversation: any) => {
           let otherUser = null;
 
           if (!conversation.is_group) {
@@ -128,33 +123,26 @@ export const useChatLogic = () => {
 
   const startChat = async (userId: string, userName: string) => {
     try {
-      // Check if conversation already exists
-      const { data: existingConversation } = await supabase
+      // Check if conversation already exists between these two users
+      const { data: existingParticipants } = await supabase
         .from('conversation_participants')
-        .select(`
-          conversation_id,
-          conversations (
-            id,
-            is_group
-          )
-        `)
+        .select('conversation_id')
         .eq('user_id', user?.id);
 
-      const directMessage = existingConversation?.find((conv: any) => {
-        return !conv.conversations.is_group;
-      });
+      if (existingParticipants) {
+        for (const participant of existingParticipants) {
+          // Check if the other user is also in this conversation
+          const { data: otherParticipant } = await supabase
+            .from('conversation_participants')
+            .select('user_id')
+            .eq('conversation_id', participant.conversation_id)
+            .eq('user_id', userId)
+            .single();
 
-      if (directMessage) {
-        // Check if the other user is in this conversation
-        const { data: otherParticipant } = await supabase
-          .from('conversation_participants')
-          .select('user_id')
-          .eq('conversation_id', directMessage.conversation_id)
-          .eq('user_id', userId)
-          .single();
-
-        if (otherParticipant) {
-          return directMessage.conversation_id;
+          if (otherParticipant) {
+            // Conversation already exists
+            return participant.conversation_id;
+          }
         }
       }
 

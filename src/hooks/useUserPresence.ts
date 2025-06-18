@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -11,10 +11,14 @@ interface UserPresence {
 export const useUserPresence = () => {
   const { user } = useAuth();
   const [onlineUsers, setOnlineUsers] = useState<UserPresence[]>([]);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const channelRef = useRef<any>(null);
+  const isSetupRef = useRef(false);
 
   useEffect(() => {
-    if (!user) return;
-
+    if (!user || isSetupRef.current) return;
+    
+    isSetupRef.current = true;
     console.log('Setting up user presence for user:', user.id);
 
     // Set user as online when they connect
@@ -42,7 +46,6 @@ export const useUserPresence = () => {
     // Fetch initial online users
     const fetchOnlineUsers = async () => {
       try {
-        console.log('Fetching online users...');
         const { data, error } = await supabase
           .from('user_presence')
           .select('user_id, is_online, last_seen');
@@ -61,8 +64,8 @@ export const useUserPresence = () => {
     setUserOnline();
     fetchOnlineUsers();
 
-    // Listen for presence updates in real-time
-    const channel = supabase
+    // Listen for presence updates in real-time (but don't refetch on every update)
+    channelRef.current = supabase
       .channel('user-presence-changes')
       .on(
         'postgres_changes',
@@ -73,7 +76,20 @@ export const useUserPresence = () => {
         },
         (payload) => {
           console.log('User presence update received:', payload);
-          fetchOnlineUsers(); // Refresh the list when any presence changes
+          // Update state directly instead of refetching
+          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+            setOnlineUsers(prev => {
+              const newData = payload.new as UserPresence;
+              const exists = prev.find(u => u.user_id === newData.user_id);
+              if (exists) {
+                return prev.map(u => u.user_id === newData.user_id ? newData : u);
+              } else {
+                return [...prev, newData];
+              }
+            });
+          } else if (payload.eventType === 'DELETE') {
+            setOnlineUsers(prev => prev.filter(u => u.user_id !== payload.old.user_id));
+          }
         }
       )
       .subscribe((status) => {
@@ -81,7 +97,7 @@ export const useUserPresence = () => {
       });
 
     // Update presence every 30 seconds to keep user online
-    const interval = setInterval(() => {
+    intervalRef.current = setInterval(() => {
       setUserOnline();
     }, 30000);
 
@@ -110,16 +126,23 @@ export const useUserPresence = () => {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      clearInterval(interval);
+      isSetupRef.current = false;
+      
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      
       window.removeEventListener('beforeunload', handleBeforeUnload);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       
       // Set user offline and cleanup
       handleBeforeUnload().then(() => {
-        supabase.removeChannel(channel);
+        if (channelRef.current) {
+          supabase.removeChannel(channelRef.current);
+        }
       });
     };
-  }, [user]);
+  }, [user?.id]); // Only depend on user.id to prevent multiple setups
 
   return { onlineUsers };
 };
