@@ -4,6 +4,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { logLoginAttempt, logRegistration, logGoogleAuth, logLogout } from '@/utils/auditLogger';
 import { useE2ECrypto } from '@/hooks/useE2ECrypto';
+import { useToast } from '@/hooks/use-toast';
 
 interface AuthContextType {
   user: User | null;
@@ -16,6 +17,9 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<{ error: any }>;
   initializeE2EE: (password: string) => Promise<{ error: any }>;
   hasE2EEKeys: boolean;
+  sessionPrivateKey: CryptoKey | null;
+  isUnlockModalOpen: boolean;
+  unlockKeys: (password: string) => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -33,8 +37,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasE2EEKeys, setHasE2EEKeys] = useState(false);
+  const [sessionPrivateKey, setSessionPrivateKey] = useState<CryptoKey | null>(null);
+  const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
   
-  const { generateAndStoreKeys, hasExistingKeys } = useE2ECrypto();
+  const { generateAndStoreKeys, hasExistingKeys, retrieveStoredKeys, decryptPrivateKey } = useE2ECrypto();
+  const { toast } = useToast();
 
   useEffect(() => {
     console.log('AuthProvider: Setting up auth listener');
@@ -52,6 +59,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const hasKeys = await hasExistingKeys(session.user.id);
           setHasE2EEKeys(hasKeys);
           
+          // If user has E2EE keys, trigger the unlock modal
+          if (hasKeys) {
+            setIsUnlockModalOpen(true);
+          }
+          
           const provider = session.user.app_metadata?.provider;
           if (provider === 'google') {
             console.log('Google auth successful, logging event');
@@ -59,6 +71,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         } else if (event === 'SIGNED_OUT') {
           setHasE2EEKeys(false);
+          setSessionPrivateKey(null);
+          setIsUnlockModalOpen(false);
         }
       }
     );
@@ -74,6 +88,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (session?.user) {
         const hasKeys = await hasExistingKeys(session.user.id);
         setHasE2EEKeys(hasKeys);
+        
+        // If user has E2EE keys, trigger the unlock modal
+        if (hasKeys) {
+          setIsUnlockModalOpen(true);
+        }
       }
     });
 
@@ -82,6 +101,63 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       subscription.unsubscribe();
     };
   }, [hasExistingKeys]);
+
+  const unlockKeys = async (password: string): Promise<boolean> => {
+    if (!user?.id) {
+      toast({
+        title: "Error",
+        description: "User not authenticated",
+        variant: "destructive"
+      });
+      return false;
+    }
+
+    try {
+      console.log('Attempting to unlock E2EE keys for user:', user.id);
+      
+      // Retrieve stored keys
+      const storedKeys = await retrieveStoredKeys(user.id);
+      if (!storedKeys) {
+        toast({
+          title: "Error", 
+          description: "No encryption keys found",
+          variant: "destructive"
+        });
+        return false;
+      }
+
+      // Decrypt the private key with the provided password
+      const privateKey = await decryptPrivateKey(
+        storedKeys.encryptedPrivateKey,
+        storedKeys.salt,
+        password
+      );
+
+      // Store the decrypted key in session state
+      setSessionPrivateKey(privateKey);
+      setIsUnlockModalOpen(false);
+      
+      console.log('E2EE keys successfully unlocked');
+      
+      toast({
+        title: "Success",
+        description: "Your messages are now unlocked",
+        variant: "default"
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Failed to unlock keys:', error);
+      
+      toast({
+        title: "Invalid Password",
+        description: "The password you entered is incorrect",
+        variant: "destructive"
+      });
+      
+      return false;
+    }
+  };
 
   const signUp = async (email: string, password: string, fullName: string) => {
     console.log('Attempting to sign up user:', email);
@@ -212,6 +288,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     resetPassword,
     initializeE2EE,
     hasE2EEKeys,
+    sessionPrivateKey,
+    isUnlockModalOpen,
+    unlockKeys,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

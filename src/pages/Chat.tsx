@@ -29,8 +29,7 @@ const Chat: React.FC = () => {
     messages, 
     loading: messagesLoading, 
     error: messagesError,
-    sendMessage,
-    PasswordModal
+    sendMessage
   } = useRealTimeMessages(selectedConversation);
 
   const handleStartChat = async (userId: string, userName: string) => {
@@ -106,7 +105,6 @@ const Chat: React.FC = () => {
             getConversationName={getConversationName}
             onSendMessage={handleSendMessage}
             error={messagesError}
-            PasswordModal={PasswordModal}
           />
         </div>
       </div>

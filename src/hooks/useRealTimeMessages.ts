@@ -3,7 +3,6 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useE2ECrypto } from '@/hooks/useE2ECrypto';
-import { useE2EESessionManager } from '@/hooks/useE2EESessionManager';
 import { fetchPublicKey } from '@/utils/publicKeyManager';
 
 interface Message {
@@ -17,9 +16,8 @@ interface Message {
 }
 
 export const useRealTimeMessages = (conversationId: string | null) => {
-  const { user } = useAuth();
-  const { encryptMessage, decryptMessage } = useE2ECrypto();
-  const { getSessionPassword, PasswordModal } = useE2EESessionManager();
+  const { user, sessionPrivateKey } = useAuth();
+  const { encryptMessage } = useE2ECrypto();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,25 +43,51 @@ export const useRealTimeMessages = (conversationId: string | null) => {
   const decryptClientMessage = useCallback(async (message: Message): Promise<Message> => {
     if (!user?.id || !mountedRef.current) return message;
 
-    try {
-      const password = await getSessionPassword();
-      if (!password) {
-        return {
-          ...message,
-          decrypted_content: '🔒 Click to unlock messages'
-        };
-      }
-
-      const decryptedContent = await decryptMessage(
-        message.content_encrypted,
-        message.iv,
-        user.id,
-        password
-      );
-
+    // If no session key is available, show locked message
+    if (!sessionPrivateKey) {
       return {
         ...message,
-        decrypted_content: decryptedContent
+        decrypted_content: '🔒 Messages locked - unlock to decrypt'
+      };
+    }
+
+    try {
+      // Decode the encrypted message and IV
+      const encryptedData = new Uint8Array(atob(message.content_encrypted).split('').map(c => c.charCodeAt(0)));
+      const ivBytes = new Uint8Array(atob(message.iv).split('').map(c => c.charCodeAt(0)));
+      
+      // The first 256 bytes are the encrypted AES key (RSA-OAEP with 2048-bit key)
+      const encryptedAESKey = encryptedData.slice(0, 256);
+      const encryptedMessageData = encryptedData.slice(256);
+      
+      // Decrypt the AES key with RSA using the session private key
+      const decryptedAESKeyData = await window.crypto.subtle.decrypt(
+        { name: "RSA-OAEP" },
+        sessionPrivateKey,
+        encryptedAESKey
+      );
+      
+      // Import the decrypted AES key
+      const aesKey = await window.crypto.subtle.importKey(
+        "raw",
+        decryptedAESKeyData,
+        { name: "AES-GCM" },
+        false,
+        ["decrypt"]
+      );
+      
+      // Decrypt the message with AES
+      const decryptedData = await window.crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: ivBytes },
+        aesKey,
+        encryptedMessageData
+      );
+      
+      const plainText = new TextDecoder().decode(decryptedData);
+      
+      return {
+        ...message,
+        decrypted_content: plainText
       };
     } catch (error) {
       console.error('Decryption error for message:', message.id, error);
@@ -72,7 +96,7 @@ export const useRealTimeMessages = (conversationId: string | null) => {
         decrypted_content: '🔒 Failed to decrypt message'
       };
     }
-  }, [user?.id, decryptMessage, getSessionPassword]);
+  }, [user?.id, sessionPrivateKey]);
 
   // Enhanced batch decryption with better error handling and performance
   const processBatchDecryption = useCallback(async (messagesToDecrypt: Message[]) => {
@@ -204,6 +228,17 @@ export const useRealTimeMessages = (conversationId: string | null) => {
       }
     }
   }, [conversationId, user, processBatchDecryption]);
+
+  // Re-decrypt messages when session key becomes available
+  useEffect(() => {
+    if (sessionPrivateKey && messages.length > 0) {
+      console.log('Session key now available, re-decrypting messages...');
+      processBatchDecryption(messages.map(msg => ({
+        ...msg,
+        decrypted_content: undefined // Reset to trigger re-decryption
+      })));
+    }
+  }, [sessionPrivateKey, processBatchDecryption]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -378,7 +413,6 @@ export const useRealTimeMessages = (conversationId: string | null) => {
     loading, 
     error,
     sendMessage, 
-    refetch: fetchMessages,
-    PasswordModal
+    refetch: fetchMessages
   };
 };
