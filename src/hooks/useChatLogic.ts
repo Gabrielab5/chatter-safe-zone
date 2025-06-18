@@ -30,6 +30,8 @@ export const useChatLogic = () => {
 
   const fetchConversations = async () => {
     try {
+      console.log('Fetching conversations for user:', user?.id);
+      
       const { data, error } = await supabase
         .from('conversation_participants')
         .select(`
@@ -43,11 +45,31 @@ export const useChatLogic = () => {
         `)
         .eq('user_id', user?.id);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching conversations:', error);
+        if (error.message.includes('infinite recursion')) {
+          toast({
+            title: "Database Error",
+            description: "There's a configuration issue. Please contact support.",
+            variant: "destructive"
+          });
+        } else {
+          throw error;
+        }
+        return;
+      }
+
+      // Handle empty conversations gracefully
+      if (!data || data.length === 0) {
+        console.log('No conversations found for user');
+        setConversations([]);
+        setLoading(false);
+        return;
+      }
 
       // Fetch conversation details with other participants
       const conversationsData = await Promise.all(
-        (data || []).map(async (item: any) => {
+        data.map(async (item: any) => {
           const conversation = item.conversations;
           let otherUser = null;
 

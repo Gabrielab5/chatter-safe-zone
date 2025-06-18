@@ -59,11 +59,16 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
 
   if (!selectedConversation) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center text-muted-foreground">
-          <MessageCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
-          <p>Select a conversation to start messaging</p>
-          <p className="text-sm mt-2">Or switch to Users tab to start a new chat</p>
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center text-muted-foreground max-w-md">
+          <MessageCircle className="h-16 w-16 mx-auto mb-6 opacity-50" />
+          <h3 className="text-xl font-semibold mb-2">Welcome to SecureTalk!</h3>
+          <p className="mb-4">Select a conversation to start messaging securely, or find new people to chat with.</p>
+          <div className="space-y-2 text-sm">
+            <p>🔒 All messages are end-to-end encrypted</p>
+            <p>👥 Click "Users" tab to find people to connect with</p>
+            <p>💬 Your privacy and security are our top priorities</p>
+          </div>
         </div>
       </div>
     );
@@ -73,16 +78,32 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
 
   return (
     <div className="flex-1 flex flex-col">
-      <div className="border-b p-4">
+      <div className="border-b p-4 bg-background">
         <h3 className="font-semibold">
-          {currentConversation && getConversationName(currentConversation)}
+          {currentConversation ? getConversationName(currentConversation) : 'Chat'}
         </h3>
+        {currentConversation && !currentConversation.is_group && currentConversation.other_user && (
+          <p className="text-sm text-muted-foreground">
+            Direct message with {currentConversation.other_user.name}
+          </p>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messagesLoading ? (
           <div className="flex items-center justify-center h-full">
-            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto mb-2"></div>
+              <p className="text-sm text-muted-foreground">Loading messages...</p>
+            </div>
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center text-muted-foreground">
+              <MessageCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p className="text-lg font-medium mb-2">No messages yet</p>
+              <p className="text-sm">Start the conversation by sending a message below</p>
+            </div>
           </div>
         ) : (
           messages.map((message) => (
@@ -99,7 +120,7 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
                     : 'bg-muted'
                 }`}
               >
-                <p>{message.decrypted_content}</p>
+                <p className="whitespace-pre-wrap">{message.decrypted_content || message.content_encrypted}</p>
                 <p className="text-xs opacity-70 mt-1">
                   {new Date(message.created_at).toLocaleTimeString()}
                 </p>
@@ -109,15 +130,16 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
         )}
       </div>
 
-      <div className="border-t p-4">
+      <div className="border-t p-4 bg-background">
         <div className="flex space-x-2">
           <Input
             placeholder="Type a message..."
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+            disabled={!selectedConversation}
           />
-          <Button onClick={handleSendMessage}>
+          <Button onClick={handleSendMessage} disabled={!newMessage.trim() || !selectedConversation}>
             <Send className="h-4 w-4" />
           </Button>
         </div>
