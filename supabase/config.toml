@@ -47,7 +47,7 @@ file_transform_enabled = true
 enabled = true
 port = 54329
 site_url = "http://localhost:5173"
-additional_redirect_urls = ["https://localhost:5173", "http://127.0.0.1:5173", "https://127.0.0.1:5173"]
+additional_redirect_urls = ["https://localhost:5173", "http://127.0.0.1:5173", "https://127.0.0.1:5173", "https://szbqmovulttttcuykyee.supabase.co/auth/v1/callback"]
 jwt_expiry = 3600
 enable_signup = true
 enable_email_confirmations = false
@@ -71,7 +71,7 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.audit-logs]
-verify_jwt = true
+verify_jwt = false
 
 [analytics]
 enabled = false

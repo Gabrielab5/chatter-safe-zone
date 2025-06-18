@@ -13,12 +13,12 @@ export const logAuthEvent = async (event: AuditEvent) => {
     // Get user agent
     const userAgent = event.userAgent || navigator.userAgent;
     
-    // Use the updated function invocation format
+    // Don't pass "unknown" IP address - let the function handle it
     const { data, error } = await supabase.functions.invoke('audit-logs', {
       body: {
         event_type: event.eventType,
         event_data: event.eventData,
-        ip_address: event.ipAddress || 'unknown',
+        ip_address: event.ipAddress || null, // Use null instead of "unknown"
         user_agent: userAgent
       }
     });

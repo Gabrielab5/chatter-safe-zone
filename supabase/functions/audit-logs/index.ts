@@ -26,12 +26,18 @@ serve(async (req) => {
       const body = await req.json();
       console.log('Logging audit event:', body);
       
+      // Fix IP address format issue - use null instead of "unknown" for inet column
+      let ipAddress = null;
+      if (body.ip_address && body.ip_address !== 'unknown') {
+        ipAddress = body.ip_address;
+      }
+      
       const { data, error } = await supabase
         .from('audit_logs')
         .insert({
           event_type: body.event_type,
           event_data: body.event_data,
-          ip_address: body.ip_address,
+          ip_address: ipAddress, // Use null instead of "unknown"
           user_agent: body.user_agent,
           user_id: null // We'll set this later when we have user context
         });
