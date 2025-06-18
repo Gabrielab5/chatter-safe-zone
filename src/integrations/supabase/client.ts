@@ -6,7 +6,7 @@ import type { Database } from './types';
 const SUPABASE_URL = "https://szbqmovulttttcuykyee.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN6YnFtb3Z1bHR0dHRjdXlreWVlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc5MDU2MjIsImV4cCI6MjA2MzQ4MTYyMn0.M6f83mdnRkzOLiLR0FFu9k_mMuT0Njqvm5KfOm8Umxg";
 
-// Configure Supabase client with proper options to avoid deprecation warnings
+// Configure Supabase client with updated parameters to avoid deprecation warnings
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
     storage: typeof window !== 'undefined' ? window.localStorage : undefined,
@@ -18,5 +18,8 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     params: {
       eventsPerSecond: 10
     }
+  },
+  db: {
+    schema: 'public'
   }
 });

@@ -25,36 +25,56 @@ export const useConversations = () => {
       setLoading(true);
       setError(null);
 
-      // Get conversation IDs for this user with improved error handling
-      const { data: participantData, error: participantError } = await supabase
-        .from('conversation_participants')
-        .select('conversation_id')
-        .eq('user_id', user.id);
+      // Enhanced error handling for conversation participants with retry logic
+      let participantData;
+      let retryCount = 0;
+      const maxRetries = 3;
 
-      if (participantError) {
-        console.error('Error fetching participants:', participantError);
-        
-        // Check if it's an RLS error
-        if (isRLSError(participantError)) {
-          setError('Authentication required to access conversations');
-          toast({
-            title: "Authentication Error",
-            description: "Please log out and log back in to access your conversations",
-            variant: "destructive"
-          });
-        } else {
-          setError('Failed to load conversations');
-          toast({
-            title: "Error",
-            description: "Failed to load conversations. Please check your connection.",
-            variant: "destructive"
-          });
+      while (retryCount < maxRetries) {
+        try {
+          const { data, error: participantError } = await supabase
+            .from('conversation_participants')
+            .select('conversation_id')
+            .eq('user_id', user.id);
+
+          if (participantError) {
+            throw participantError;
+          }
+
+          participantData = data;
+          break;
+        } catch (error) {
+          retryCount++;
+          console.warn(`Conversation fetch attempt ${retryCount} failed:`, error);
+          
+          if (retryCount >= maxRetries) {
+            console.error('Max retries reached for fetching participants:', error);
+            
+            if (isRLSError(error)) {
+              setError('Authentication required to access conversations');
+              toast({
+                title: "Authentication Error",
+                description: "Please log out and log back in to access your conversations",
+                variant: "destructive"
+              });
+            } else {
+              setError('Failed to load conversations');
+              toast({
+                title: "Error",
+                description: "Failed to load conversations. Please check your connection and try again.",
+                variant: "destructive"
+              });
+            }
+            return;
+          }
+          
+          // Wait before retry with exponential backoff
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
         }
-        return;
       }
 
       if (!participantData || participantData.length === 0) {
-        console.log('No conversations found');
+        console.log('No conversations found for user');
         setConversations([]);
         return;
       }
@@ -62,25 +82,30 @@ export const useConversations = () => {
       const conversationIds = participantData.map(p => p.conversation_id);
       console.log('Found conversation IDs:', conversationIds);
 
-      // Get conversation details with better error handling
-      const { data: conversationData, error: conversationError } = await supabase
+      // Enhanced conversation details fetching with timeout protection
+      const conversationPromise = supabase
         .from('conversations')
         .select('id, name, is_group, created_at')
         .in('id', conversationIds)
         .order('created_at', { ascending: false });
+
+      const { data: conversationData, error: conversationError } = await Promise.race([
+        conversationPromise,
+        createTimeoutPromise(10000, 'Conversation fetch timeout')
+      ]) as any;
 
       if (conversationError) {
         console.error('Error fetching conversations:', conversationError);
         setError('Failed to load conversation details');
         toast({
           title: "Error",
-          description: "Failed to load conversation details",
+          description: "Failed to load conversation details. Please try refreshing the page.",
           variant: "destructive"
         });
         return;
       }
 
-      // Get other participants for direct messages with timeout protection
+      // Enhanced participant enrichment with better error handling
       const enrichedConversations = await Promise.allSettled(
         (conversationData || []).map(async (conversation) => {
           try {
@@ -93,7 +118,7 @@ export const useConversations = () => {
               };
             }
 
-            // For direct messages, get the other participant with timeout
+            // For direct messages, get the other participant with enhanced timeout protection
             const participantPromise = supabase
               .from('conversation_participants')
               .select('user_id')
@@ -103,20 +128,20 @@ export const useConversations = () => {
 
             const { data: otherParticipants, error: participantsError } = await Promise.race([
               participantPromise,
-              createTimeoutPromise(5000, 'Timeout')
+              createTimeoutPromise(5000, 'Participant fetch timeout')
             ]) as any;
 
             if (participantsError || !otherParticipants || otherParticipants.length === 0) {
               console.warn('Could not fetch other participants for conversation:', conversation.id);
               return {
                 id: conversation.id,
-                name: conversation.name,
+                name: conversation.name || 'Unknown Chat',
                 is_group: conversation.is_group,
                 created_at: conversation.created_at
               };
             }
 
-            // Get profile info for the other user with timeout
+            // Enhanced profile fetching with fallback
             const profilePromise = supabase
               .from('profiles')
               .select('id, full_name, avatar_url')
@@ -125,7 +150,7 @@ export const useConversations = () => {
 
             const { data: profile, error: profileError } = await Promise.race([
               profilePromise,
-              createTimeoutPromise(3000, 'Profile timeout')
+              createTimeoutPromise(3000, 'Profile fetch timeout')
             ]) as any;
 
             let otherUser = null;
@@ -139,7 +164,7 @@ export const useConversations = () => {
 
             return {
               id: conversation.id,
-              name: conversation.name,
+              name: conversation.name || (otherUser?.name ? `Chat with ${otherUser.name}` : 'Unknown Chat'),
               is_group: conversation.is_group,
               created_at: conversation.created_at,
               other_user: otherUser
@@ -148,7 +173,7 @@ export const useConversations = () => {
             console.error('Error enriching conversation:', error);
             return {
               id: conversation.id,
-              name: conversation.name,
+              name: conversation.name || 'Unknown Chat',
               is_group: conversation.is_group,
               created_at: conversation.created_at
             };
@@ -156,26 +181,31 @@ export const useConversations = () => {
         })
       );
 
-      // Filter successful results
+      // Filter successful results and log failures
       const validConversations = enrichedConversations
         .filter(result => result.status === 'fulfilled')
         .map(result => (result as PromiseFulfilledResult<any>).value);
 
-      console.log('Loaded conversations:', validConversations.length);
-      setConversations(validConversations);
-
-      // Log any failed enrichments
       const failedCount = enrichedConversations.filter(result => result.status === 'rejected').length;
+      
+      console.log(`Successfully loaded ${validConversations.length} conversations`);
       if (failedCount > 0) {
         console.warn(`Failed to enrich ${failedCount} conversations`);
+        toast({
+          title: "Partial Load",
+          description: `${validConversations.length} conversations loaded successfully, ${failedCount} had issues`,
+          variant: "default"
+        });
       }
 
+      setConversations(validConversations);
+
     } catch (error) {
-      console.error('Error in fetchConversations:', error);
+      console.error('Unexpected error in fetchConversations:', error);
       setError('Failed to load conversations');
       toast({
         title: "Error",
-        description: "An unexpected error occurred while loading conversations",
+        description: "An unexpected error occurred while loading conversations. Please refresh the page.",
         variant: "destructive"
       });
     } finally {

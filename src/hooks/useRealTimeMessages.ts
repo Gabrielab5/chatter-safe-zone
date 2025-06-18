@@ -20,13 +20,17 @@ export const useRealTimeMessages = (conversationId: string | null) => {
   const [error, setError] = useState<string | null>(null);
   const channelRef = useRef<any>(null);
   const isDecryptingRef = useRef(false);
-  const decryptionQueueRef = useRef<Message[]>([]);
+  const mountedRef = useRef(true);
 
   const decryptMessage = useCallback(async (message: Message): Promise<Message> => {
-    if (!conversationId) return message;
+    if (!conversationId || !mountedRef.current) return message;
 
     try {
-      const { data, error } = await supabase.functions.invoke('encryption', {
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Decryption timeout')), 8000)
+      );
+
+      const decryptionPromise = supabase.functions.invoke('encryption', {
         body: {
           action: 'decrypt',
           conversationId: conversationId,
@@ -35,8 +39,13 @@ export const useRealTimeMessages = (conversationId: string | null) => {
         }
       });
 
+      const { data, error } = await Promise.race([
+        decryptionPromise,
+        timeoutPromise
+      ]) as any;
+
       if (error) {
-        console.error('Decryption error:', error);
+        console.error('Decryption error for message:', message.id, error);
         return {
           ...message,
           decrypted_content: '🔒 Failed to decrypt message'
@@ -45,38 +54,42 @@ export const useRealTimeMessages = (conversationId: string | null) => {
 
       return {
         ...message,
-        decrypted_content: data?.message || '🔒 Failed to decrypt message'
+        decrypted_content: data?.message || '🔒 Decryption failed'
       };
     } catch (error) {
-      console.error('Decryption error:', error);
+      console.error('Decryption error for message:', message.id, error);
       return {
         ...message,
-        decrypted_content: '🔒 Failed to decrypt message'
+        decrypted_content: error.message.includes('timeout') ? '🔒 Decryption timeout' : '🔒 Failed to decrypt message'
       };
     }
   }, [conversationId]);
 
-  // Optimized batch decryption with queue management
+  // Enhanced batch decryption with better error handling and performance
   const processBatchDecryption = useCallback(async (messagesToDecrypt: Message[]) => {
-    if (isDecryptingRef.current || messagesToDecrypt.length === 0) return;
+    if (isDecryptingRef.current || messagesToDecrypt.length === 0 || !mountedRef.current) return;
     
     isDecryptingRef.current = true;
     
     try {
-      const batchSize = 3; // Reduced batch size for better responsiveness
+      const batchSize = 3;
       const decryptedMessages: Message[] = [];
       
       for (let i = 0; i < messagesToDecrypt.length; i += batchSize) {
+        if (!mountedRef.current) break;
+        
         const batch = messagesToDecrypt.slice(i, i + batchSize);
         
-        // Process batch with timeout protection
         const decryptPromises = batch.map(async (msg) => {
-          return Promise.race([
-            decryptMessage(msg),
-            new Promise<Message>((_, reject) => 
-              setTimeout(() => reject(new Error('Decryption timeout')), 10000)
-            )
-          ]);
+          try {
+            return await decryptMessage(msg);
+          } catch (error) {
+            console.error('Batch decryption error for message:', msg.id, error);
+            return {
+              ...msg,
+              decrypted_content: '🔒 Decryption failed'
+            };
+          }
         });
         
         try {
@@ -89,29 +102,30 @@ export const useRealTimeMessages = (conversationId: string | null) => {
               console.error('Decryption failed for message:', batch[index].id, result.reason);
               decryptedMessages.push({
                 ...batch[index],
-                decrypted_content: '🔒 Decryption timeout'
+                decrypted_content: '🔒 Decryption error'
               });
             }
           });
           
-          // Add small delay between batches to prevent overwhelming
-          if (i + batchSize < messagesToDecrypt.length) {
-            await new Promise(resolve => setTimeout(resolve, 100));
+          // Small delay between batches to prevent overwhelming
+          if (i + batchSize < messagesToDecrypt.length && mountedRef.current) {
+            await new Promise(resolve => setTimeout(resolve, 50));
           }
         } catch (error) {
-          console.error('Batch decryption error:', error);
-          // Add failed messages with error content
+          console.error('Batch processing error:', error);
           batch.forEach(msg => {
             decryptedMessages.push({
               ...msg,
-              decrypted_content: '🔒 Decryption failed'
+              decrypted_content: '🔒 Processing error'
             });
           });
         }
       }
       
-      setMessages(decryptedMessages);
-      console.log(`Successfully processed ${decryptedMessages.length} messages`);
+      if (mountedRef.current) {
+        setMessages(decryptedMessages);
+        console.log(`Successfully processed ${decryptedMessages.length} messages`);
+      }
       
     } finally {
       isDecryptingRef.current = false;
@@ -119,7 +133,7 @@ export const useRealTimeMessages = (conversationId: string | null) => {
   }, [decryptMessage]);
 
   const fetchMessages = useCallback(async () => {
-    if (!conversationId || !user) {
+    if (!conversationId || !user || !mountedRef.current) {
       setMessages([]);
       return;
     }
@@ -130,35 +144,61 @@ export const useRealTimeMessages = (conversationId: string | null) => {
     try {
       console.log('Fetching messages for conversation:', conversationId);
       
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true })
-        .limit(50); // Add reasonable limit for performance
+      // Enhanced message fetching with retry logic
+      let retryCount = 0;
+      const maxRetries = 3;
+      let messageData;
 
-      if (error) {
-        console.error('Error fetching messages:', error);
-        setError('Failed to load messages. Please try again.');
-        return;
+      while (retryCount < maxRetries && mountedRef.current) {
+        try {
+          const { data, error } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('conversation_id', conversationId)
+            .order('created_at', { ascending: true })
+            .limit(100);
+
+          if (error) {
+            throw error;
+          }
+
+          messageData = data;
+          break;
+        } catch (error) {
+          retryCount++;
+          console.error(`Message fetch attempt ${retryCount} failed:`, error);
+          
+          if (retryCount >= maxRetries) {
+            setError('Failed to load messages. Please try refreshing.');
+            return;
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+        }
       }
 
-      if (data && data.length > 0) {
-        console.log(`Found ${data.length} messages, starting decryption...`);
-        await processBatchDecryption(data as Message[]);
-      } else {
+      if (messageData && messageData.length > 0 && mountedRef.current) {
+        console.log(`Found ${messageData.length} messages, starting decryption...`);
+        await processBatchDecryption(messageData as Message[]);
+      } else if (mountedRef.current) {
         setMessages([]);
         console.log('No messages found for conversation');
       }
     } catch (error) {
       console.error('Error in fetchMessages:', error);
-      setError('Failed to load messages. Please check your connection.');
+      if (mountedRef.current) {
+        setError('Failed to load messages. Please check your connection.');
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
   }, [conversationId, user, processBatchDecryption]);
 
   useEffect(() => {
+    mountedRef.current = true;
+
     if (!conversationId || !user) {
       setMessages([]);
       setError(null);
@@ -167,13 +207,12 @@ export const useRealTimeMessages = (conversationId: string | null) => {
 
     fetchMessages();
 
-    // Clean up existing channel before creating new one
+    // Enhanced real-time subscription with better error handling
     if (channelRef.current) {
       supabase.removeChannel(channelRef.current);
       channelRef.current = null;
     }
 
-    // Subscribe to real-time updates with improved error handling
     const channelName = `messages-${conversationId}-${Date.now()}`;
     channelRef.current = supabase
       .channel(channelName)
@@ -186,19 +225,23 @@ export const useRealTimeMessages = (conversationId: string | null) => {
           filter: `conversation_id=eq.${conversationId}`
         },
         async (payload) => {
+          if (!mountedRef.current) return;
+          
           console.log('New message received:', payload);
           const newMessage = payload.new as Message;
           
-          // Only decrypt and add if it's not from the current user
+          // Only process if it's not from the current user
           if (newMessage.sender_id !== user.id) {
             try {
               const decryptedMessage = await decryptMessage(newMessage);
-              setMessages(prev => {
-                // Prevent duplicate messages
-                const exists = prev.find(msg => msg.id === decryptedMessage.id);
-                if (exists) return prev;
-                return [...prev, decryptedMessage];
-              });
+              
+              if (mountedRef.current) {
+                setMessages(prev => {
+                  const exists = prev.find(msg => msg.id === decryptedMessage.id);
+                  if (exists) return prev;
+                  return [...prev, decryptedMessage];
+                });
+              }
             } catch (error) {
               console.error('Error processing new message:', error);
             }
@@ -208,16 +251,18 @@ export const useRealTimeMessages = (conversationId: string | null) => {
       .subscribe((status) => {
         console.log(`Messages channel status for ${conversationId}:`, status);
         
-        if (status === 'CHANNEL_ERROR') {
+        if (status === 'CHANNEL_ERROR' && mountedRef.current) {
           console.error('Message subscription error');
           setError('Connection lost. Messages may not update in real-time.');
-        } else if (status === 'SUBSCRIBED') {
-          setError(null); // Clear error when reconnected
+        } else if (status === 'SUBSCRIBED' && mountedRef.current) {
+          setError(null);
         }
       });
 
     return () => {
       console.log(`Cleaning up messages subscription for ${conversationId}`);
+      mountedRef.current = false;
+      
       if (channelRef.current) {
         try {
           supabase.removeChannel(channelRef.current);
@@ -230,46 +275,68 @@ export const useRealTimeMessages = (conversationId: string | null) => {
   }, [conversationId, user, fetchMessages, decryptMessage]);
 
   const sendMessage = useCallback(async (content: string) => {
-    if (!conversationId || !content.trim() || !user) {
+    if (!conversationId || !content.trim() || !user || !mountedRef.current) {
       throw new Error('Missing required parameters for sending message');
     }
 
     try {
       console.log('Encrypting and sending message...');
       
-      // Encrypt the message with timeout protection
-      const encryptionPromise = supabase.functions.invoke('encryption', {
-        body: {
-          action: 'encrypt',
-          conversationId: conversationId,
-          message: content
-        }
-      });
-      
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Encryption timeout')), 15000)
-      );
-      
-      const { data: encryptionData, error: encryptionError } = await Promise.race([
-        encryptionPromise,
-        timeoutPromise
-      ]) as any;
+      // Enhanced encryption with timeout and retry logic
+      let encryptionData;
+      let retryCount = 0;
+      const maxRetries = 2;
 
-      if (encryptionError) {
-        console.error('Encryption error:', encryptionError);
-        throw new Error('Failed to encrypt message. Please try again.');
+      while (retryCount <= maxRetries && mountedRef.current) {
+        try {
+          const encryptionPromise = supabase.functions.invoke('encryption', {
+            body: {
+              action: 'encrypt',
+              conversationId: conversationId,
+              message: content
+            }
+          });
+          
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Encryption timeout')), 10000)
+          );
+          
+          const { data, error: encryptionError } = await Promise.race([
+            encryptionPromise,
+            timeoutPromise
+          ]) as any;
+
+          if (encryptionError) {
+            throw encryptionError;
+          }
+
+          encryptionData = data;
+          break;
+        } catch (error) {
+          retryCount++;
+          console.error(`Encryption attempt ${retryCount} failed:`, error);
+          
+          if (retryCount > maxRetries) {
+            throw new Error('Failed to encrypt message after multiple attempts');
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      if (!encryptionData || !mountedRef.current) {
+        throw new Error('Encryption failed or component unmounted');
       }
 
       const { encrypted, iv } = encryptionData;
 
       console.log('Saving encrypted message...');
       
-      // Save the encrypted message with retry logic
-      let saveAttempts = 0;
-      const maxSaveAttempts = 3;
+      // Enhanced message saving with retry logic
       let messageData;
+      retryCount = 0;
       
-      while (saveAttempts < maxSaveAttempts) {
+      while (retryCount <= maxRetries && mountedRef.current) {
         try {
           const { data, error: saveError } = await supabase
             .from('messages')
@@ -289,16 +356,19 @@ export const useRealTimeMessages = (conversationId: string | null) => {
           messageData = data;
           break;
         } catch (error) {
-          saveAttempts++;
-          console.error(`Save attempt ${saveAttempts} failed:`, error);
+          retryCount++;
+          console.error(`Save attempt ${retryCount} failed:`, error);
           
-          if (saveAttempts >= maxSaveAttempts) {
+          if (retryCount > maxRetries) {
             throw new Error('Failed to save message after multiple attempts');
           }
           
-          // Wait before retry
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
+      }
+
+      if (!messageData || !mountedRef.current) {
+        throw new Error('Message save failed or component unmounted');
       }
 
       // Add the message to local state immediately for the sender
@@ -307,19 +377,19 @@ export const useRealTimeMessages = (conversationId: string | null) => {
         decrypted_content: content
       };
       
-      setMessages(prev => {
-        // Prevent duplicates
-        const exists = prev.find(msg => msg.id === newMessage.id);
-        if (exists) return prev;
-        return [...prev, newMessage];
-      });
-      
-      console.log('Message sent and displayed successfully');
+      if (mountedRef.current) {
+        setMessages(prev => {
+          const exists = prev.find(msg => msg.id === newMessage.id);
+          if (exists) return prev;
+          return [...prev, newMessage];
+        });
+        
+        console.log('Message sent and displayed successfully');
+      }
 
     } catch (error) {
       console.error('Error sending message:', error);
       
-      // Provide user-friendly error messages
       if (error.message.includes('timeout')) {
         throw new Error('Message sending timed out. Please check your connection and try again.');
       } else if (error.message.includes('encrypt')) {
