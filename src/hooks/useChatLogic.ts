@@ -53,26 +53,31 @@ export const useChatLogic = () => {
 
           if (!conversation.is_group) {
             // For direct messages, get the other participant's info
-            const { data: participants } = await supabase
+            const { data: participants, error: participantsError } = await supabase
               .from('conversation_participants')
-              .select(`
-                user_id,
-                profiles!inner (
-                  id,
-                  full_name,
-                  avatar_url
-                )
-              `)
+              .select('user_id')
               .eq('conversation_id', conversation.id)
               .neq('user_id', user?.id);
 
-            if (participants && participants.length > 0) {
-              const profile = participants[0].profiles;
-              otherUser = {
-                id: profile.id,
-                name: profile.full_name || 'Unknown User',
-                avatar_url: profile.avatar_url
-              };
+            if (participantsError) {
+              console.error('Error fetching participants:', participantsError);
+            } else if (participants && participants.length > 0) {
+              // Get profile info for the other user
+              const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('id, full_name, avatar_url')
+                .eq('id', participants[0].user_id)
+                .single();
+
+              if (profileError) {
+                console.error('Error fetching profile:', profileError);
+              } else if (profile) {
+                otherUser = {
+                  id: profile.id,
+                  name: profile.full_name || 'Unknown User',
+                  avatar_url: profile.avatar_url
+                };
+              }
             }
           }
 
