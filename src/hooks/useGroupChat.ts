@@ -137,7 +137,7 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
       return validParticipants.map(p => ({
         id: p.user_id,
         name: p.profiles?.full_name || 'Unknown User',
-        avatar_url: p.profiles?.avatar_url
+        avatar_url: p.profiles?.avatar_url || undefined
       }));
     } catch (error) {
       console.error('Error in getGroupMembers:', error);

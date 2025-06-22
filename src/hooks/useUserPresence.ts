@@ -87,8 +87,8 @@ export const useUserPresence = () => {
           user_id: presence.user_id,
           is_online: presence.is_online,
           last_seen: presence.last_seen,
-          full_name: presence.profiles?.full_name,
-          avatar_url: presence.profiles?.avatar_url
+          full_name: presence.profiles?.full_name || undefined,
+          avatar_url: presence.profiles?.avatar_url || undefined
         }));
         
         setOnlineUsers(usersWithProfiles);
