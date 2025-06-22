@@ -1,8 +1,9 @@
+
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import type { UserPresence } from '@/types/userPresence';
-import { setUserOnlineStatus, setUserOfflineStatus, fetchInitialOnlineUsers } from '@/utils/presenceUtils';
+import { setUserOnlineStatus, setUserOfflineStatus } from '@/utils/presenceUtils';
 import { createPresenceSubscription } from '@/utils/presenceSubscription';
 import { createPresenceHeartbeat } from '@/utils/presenceHeartbeat';
 
@@ -28,9 +29,34 @@ export const useUserPresence = () => {
     if (!user || !mountedRef.current) return;
     
     try {
-      const data = await fetchInitialOnlineUsers();
+      const { data, error } = await supabase
+        .from('user_presence')
+        .select(`
+          user_id,
+          is_online,
+          last_seen,
+          profiles!user_presence_user_id_fkey(
+            full_name,
+            avatar_url
+          )
+        `)
+        .neq('user_id', user.id);
+
+      if (error) {
+        console.error('Error fetching initial users:', error);
+        return;
+      }
+
       if (mountedRef.current) {
-        setOnlineUsers(data);
+        const usersWithProfiles = data?.map(presence => ({
+          user_id: presence.user_id,
+          is_online: presence.is_online,
+          last_seen: presence.last_seen,
+          full_name: presence.profiles?.full_name,
+          avatar_url: presence.profiles?.avatar_url
+        })) || [];
+        
+        setOnlineUsers(usersWithProfiles);
       }
     } catch (error) {
       console.error('Error loading initial users:', error);

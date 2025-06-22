@@ -80,7 +80,7 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
         .from('conversation_participants')
         .select(`
           user_id,
-          profiles!inner(
+          profiles!conversation_participants_user_id_fkey(
             id,
             full_name,
             avatar_url
@@ -93,11 +93,11 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
         return [];
       }
 
-      return participants.map(p => ({
+      return participants?.map(p => ({
         id: p.user_id,
-        name: p.profiles.full_name || 'Unknown User',
-        avatar_url: p.profiles.avatar_url
-      }));
+        name: p.profiles?.full_name || 'Unknown User',
+        avatar_url: p.profiles?.avatar_url
+      })) || [];
     } catch (error) {
       console.error('Error in getGroupMembers:', error);
       return [];
