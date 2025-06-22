@@ -39,7 +39,8 @@ export const useUserPresence = () => {
     if (!user || !mountedRef.current) return;
     
     try {
-      const { data, error } = await supabase
+      // First, try to get user presence with profile join
+      const { data: presenceWithProfiles, error: joinError } = await supabase
         .from('user_presence')
         .select(`
           user_id,
@@ -52,13 +53,36 @@ export const useUserPresence = () => {
         `)
         .neq('user_id', user.id);
 
-      if (error) {
-        console.error('Error fetching initial users:', error);
+      // If join query fails, fall back to basic user presence query
+      if (joinError) {
+        console.log('Join query failed, falling back to basic query:', joinError);
+        
+        const { data: basicPresence, error: basicError } = await supabase
+          .from('user_presence')
+          .select('user_id, is_online, last_seen')
+          .neq('user_id', user.id);
+
+        if (basicError) {
+          console.error('Error fetching basic user presence:', basicError);
+          return;
+        }
+
+        if (mountedRef.current && basicPresence) {
+          const usersWithoutProfiles = basicPresence.map(presence => ({
+            user_id: presence.user_id,
+            is_online: presence.is_online,
+            last_seen: presence.last_seen,
+            full_name: undefined,
+            avatar_url: undefined
+          }));
+          
+          setOnlineUsers(usersWithoutProfiles);
+        }
         return;
       }
 
-      if (mountedRef.current && data) {
-        // Enhanced type guard with proper error handling
+      if (mountedRef.current && presenceWithProfiles) {
+        // Enhanced type guard to handle both valid profiles and errors
         const isValidPresence = (p: any): p is UserPresenceWithProfile => {
           // Check basic structure
           if (!p || 
@@ -75,9 +99,9 @@ export const useUserPresence = () => {
           
           // If profiles is an object, check if it's a valid profile or an error
           if (typeof p.profiles === 'object' && p.profiles !== null) {
-            // Check for error indicators (SelectQueryError has error property)
-            if ('error' in p.profiles || 'message' in p.profiles || 'code' in p.profiles) {
-              console.log('Profile query error for user:', p.user_id);
+            // Check for error indicators (SelectQueryError has specific properties)
+            if ('error' in p.profiles || 'message' in p.profiles || 'code' in p.profiles || 'details' in p.profiles) {
+              console.log('Profile query error for user:', p.user_id, p.profiles);
               return false;
             }
             
@@ -88,9 +112,9 @@ export const useUserPresence = () => {
           return false;
         };
 
-        const validPresenceData = data.filter(isValidPresence);
+        const validPresenceData = presenceWithProfiles.filter(isValidPresence);
         
-        console.log(`Found ${validPresenceData.length} valid presence records out of ${data.length} total`);
+        console.log(`Found ${validPresenceData.length} valid presence records out of ${presenceWithProfiles.length} total`);
 
         const usersWithProfiles = validPresenceData.map(presence => ({
           user_id: presence.user_id,

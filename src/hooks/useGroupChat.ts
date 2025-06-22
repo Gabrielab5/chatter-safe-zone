@@ -86,7 +86,8 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
 
   const getGroupMembers = useCallback(async (conversationId: string) => {
     try {
-      const { data: participants, error } = await supabase
+      // First, try to get participants with profile join
+      const { data: participantsWithProfiles, error: joinError } = await supabase
         .from('conversation_participants')
         .select(`
           user_id,
@@ -98,17 +99,38 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
         `)
         .eq('conversation_id', conversationId);
 
-      if (error) {
-        console.error('Error fetching group members:', error);
-        return [];
+      // If join query fails, fall back to basic participants query
+      if (joinError) {
+        console.log('Join query failed, falling back to basic query:', joinError);
+        
+        const { data: basicParticipants, error: basicError } = await supabase
+          .from('conversation_participants')
+          .select('user_id')
+          .eq('conversation_id', conversationId);
+
+        if (basicError) {
+          console.error('Error fetching basic participants:', basicError);
+          return [];
+        }
+
+        if (!basicParticipants || !Array.isArray(basicParticipants)) {
+          return [];
+        }
+
+        // Return basic participant data without profiles
+        return basicParticipants.map(p => ({
+          id: p.user_id,
+          name: 'Unknown User',
+          avatar_url: undefined
+        }));
       }
 
-      if (!participants || !Array.isArray(participants)) {
+      if (!participantsWithProfiles || !Array.isArray(participantsWithProfiles)) {
         console.log('No participants data found');
         return [];
       }
 
-      // Enhanced type guard with proper error handling
+      // Enhanced type guard to handle both valid profiles and errors
       const isValidParticipant = (p: any): p is ParticipantWithProfile => {
         // Check if it's a basic participant structure
         if (!p || typeof p.user_id !== 'string') {
@@ -122,9 +144,9 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
         
         // If profiles is an object, check if it's a valid profile or an error
         if (typeof p.profiles === 'object' && p.profiles !== null) {
-          // Check for error indicators (SelectQueryError has error property)
-          if ('error' in p.profiles || 'message' in p.profiles || 'code' in p.profiles) {
-            console.log('Profile query error for user:', p.user_id);
+          // Check for error indicators (SelectQueryError has specific properties)
+          if ('error' in p.profiles || 'message' in p.profiles || 'code' in p.profiles || 'details' in p.profiles) {
+            console.log('Profile query error for user:', p.user_id, p.profiles);
             return false;
           }
           
@@ -137,9 +159,9 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
         return false;
       };
 
-      const validParticipants = participants.filter(isValidParticipant);
+      const validParticipants = participantsWithProfiles.filter(isValidParticipant);
       
-      console.log(`Found ${validParticipants.length} valid participants out of ${participants.length} total`);
+      console.log(`Found ${validParticipants.length} valid participants out of ${participantsWithProfiles.length} total`);
 
       return validParticipants.map(p => ({
         id: p.user_id,
