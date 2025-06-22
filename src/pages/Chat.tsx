@@ -7,6 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useUserPresence } from '@/hooks/useUserPresence';
 import { useRealTimeMessages } from '@/hooks/useRealTimeMessages';
 import { useChatLogic } from '@/hooks/useChatLogic';
+import { useGroupChat } from '@/hooks/useGroupChat';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle } from 'lucide-react';
 import type { UserPresence } from '@/types/userPresence';
@@ -22,8 +23,11 @@ const Chat: React.FC = () => {
     loading: conversationsLoading,
     error: conversationsError,
     startChat, 
-    getConversationName 
+    getConversationName,
+    fetchConversations
   } = useChatLogic();
+
+  const { createGroupChat } = useGroupChat(fetchConversations);
 
   const { 
     messages, 
@@ -39,6 +43,17 @@ const Chat: React.FC = () => {
       setActiveTab('chats');
     } catch (error) {
       console.error('Failed to start chat:', error);
+    }
+  };
+
+  const handleCreateGroup = async (groupName: string, selectedUserIds: string[]) => {
+    try {
+      const conversationId = await createGroupChat(groupName, selectedUserIds);
+      setSelectedConversation(conversationId);
+      setActiveTab('chats');
+    } catch (error) {
+      console.error('Failed to create group:', error);
+      throw error; // Re-throw to let GroupCreationModal handle the error toast
     }
   };
 
@@ -83,6 +98,7 @@ const Chat: React.FC = () => {
           setSelectedConversation={setSelectedConversation}
           onlineUsers={onlineUsers}
           onStartChat={handleStartChat}
+          onCreateGroup={handleCreateGroup}
           getConversationName={getConversationName}
           isUserOnline={isUserOnline}
         />

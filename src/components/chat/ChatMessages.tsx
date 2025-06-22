@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { MessageCircle, Send, AlertCircle, Wifi, WifiOff } from 'lucide-react';
+import { MessageCircle, Send, AlertCircle, Wifi, WifiOff, Users } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -50,6 +50,7 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
   const [newMessage, setNewMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'online' | 'offline'>('online');
+  const [senderNames, setSenderNames] = useState<Record<string, string>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -86,6 +87,27 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  // Fetch sender names for group chats
+  useEffect(() => {
+    const currentConversation = conversations.find(c => c.id === selectedConversation);
+    if (currentConversation?.is_group && messages.length > 0) {
+      // Extract unique sender IDs from messages
+      const senderIds = [...new Set(messages.map(m => m.sender_id))];
+      
+      // For group chats, we'd need to fetch user profiles
+      // For now, we'll use a placeholder system
+      const names: Record<string, string> = {};
+      senderIds.forEach(id => {
+        if (id === user?.id) {
+          names[id] = 'You';
+        } else {
+          names[id] = `User ${id.slice(0, 8)}...`; // Placeholder
+        }
+      });
+      setSenderNames(names);
+    }
+  }, [selectedConversation, conversations, messages, user?.id]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedConversation || sending) return;
@@ -128,7 +150,7 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
             </div>
             <div className="flex items-center justify-center gap-2">
               <span className="text-blue-500">👥</span>
-              <span>Click "Users" tab to find people to connect with</span>
+              <span>Create group chats or start one-on-one conversations</span>
             </div>
             <div className="flex items-center justify-center gap-2">
               <span className="text-purple-500">💬</span>
@@ -147,25 +169,35 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
       {/* Enhanced Header with Connection Status */}
       <div className="border-b p-4 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold flex items-center gap-2">
-              {currentConversation ? getConversationName(currentConversation) : 'Chat'}
-              {connectionStatus === 'offline' && (
-                <span title="Offline">
-                  <WifiOff className="h-4 w-4 text-red-500" />
-                </span>
-              )}
-              {connectionStatus === 'online' && (
-                <span title="Online">
-                  <Wifi className="h-4 w-4 text-green-500" />
-                </span>
-              )}
-            </h3>
-            {currentConversation && !currentConversation.is_group && currentConversation.other_user && (
-              <p className="text-sm text-muted-foreground">
-                Direct message with {currentConversation.other_user.name}
-              </p>
+          <div className="flex items-center gap-3">
+            {currentConversation?.is_group && (
+              <div className="h-10 w-10 bg-primary text-primary-foreground rounded-full flex items-center justify-center">
+                <Users className="h-5 w-5" />
+              </div>
             )}
+            <div>
+              <h3 className="font-semibold flex items-center gap-2">
+                {currentConversation ? getConversationName(currentConversation) : 'Chat'}
+                {connectionStatus === 'offline' && (
+                  <span title="Offline">
+                    <WifiOff className="h-4 w-4 text-red-500" />
+                  </span>
+                )}
+                {connectionStatus === 'online' && (
+                  <span title="Online">
+                    <Wifi className="h-4 w-4 text-green-500" />
+                  </span>
+                )}
+              </h3>
+              {currentConversation && (
+                <p className="text-sm text-muted-foreground">
+                  {currentConversation.is_group 
+                    ? 'Group conversation'
+                    : `Direct message with ${currentConversation.other_user?.name || 'Unknown User'}`
+                  }
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -210,7 +242,12 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
             <div className="text-center text-muted-foreground">
               <MessageCircle className="h-16 w-16 mx-auto mb-4 opacity-50" />
               <p className="text-lg font-medium mb-2">No messages yet</p>
-              <p className="text-sm">Start the conversation by sending a message below</p>
+              <p className="text-sm">
+                {currentConversation?.is_group 
+                  ? 'Start the group conversation by sending a message below'
+                  : 'Start the conversation by sending a message below'
+                }
+              </p>
             </div>
           </div>
         ) : (
@@ -219,6 +256,9 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
               const isOwn = message.sender_id === user?.id;
               const showTimestamp = index === 0 || 
                 (new Date(message.created_at).getTime() - new Date(messages[index - 1].created_at).getTime()) > 300000; // 5 minutes
+              
+              const isGroupChat = currentConversation?.is_group;
+              const senderName = isGroupChat ? (senderNames[message.sender_id] || 'Unknown') : null;
 
               return (
                 <div key={message.id}>
@@ -235,6 +275,9 @@ const ChatMessages: React.FC<ChatMessagesProps> = ({
                           : 'bg-muted rounded-bl-md'
                       } shadow-sm`}
                     >
+                      {isGroupChat && !isOwn && senderName && (
+                        <p className="text-xs font-medium opacity-70 mb-1">{senderName}</p>
+                      )}
                       <p className="whitespace-pre-wrap break-words">
                         {message.decrypted_content || (
                           <span className="italic opacity-70">

@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MessageCircle, Users } from 'lucide-react';
 import ConversationsList from './ConversationsList';
 import UserSearch from './UserSearch';
+import GroupCreationModal from './GroupCreationModal';
 import type { UserPresence } from '@/types/userPresence';
 
 interface Conversation {
@@ -26,6 +27,7 @@ interface ChatTabsProps {
   setSelectedConversation: (id: string) => void;
   onlineUsers: UserPresence[];
   onStartChat: (userId: string, userName: string) => void;
+  onCreateGroup: (groupName: string, selectedUserIds: string[]) => Promise<void>;
   getConversationName: (conversation: Conversation) => string;
   isUserOnline: (userId: string) => boolean;
 }
@@ -38,6 +40,7 @@ const ChatTabs: React.FC<ChatTabsProps> = ({
   setSelectedConversation,
   onlineUsers,
   onStartChat,
+  onCreateGroup,
   getConversationName,
   isUserOnline
 }) => {
@@ -67,7 +70,11 @@ const ChatTabs: React.FC<ChatTabsProps> = ({
           />
         </TabsContent>
 
-        <TabsContent value="users" className="flex-1 overflow-y-auto m-0 p-4">
+        <TabsContent value="users" className="flex-1 overflow-y-auto m-0 p-4 space-y-4">
+          <GroupCreationModal 
+            onlineUsers={onlineUsers}
+            onCreateGroup={onCreateGroup}
+          />
           <UserSearch onStartChat={onStartChat} onlineUsers={onlineUsers} />
         </TabsContent>
       </Tabs>
