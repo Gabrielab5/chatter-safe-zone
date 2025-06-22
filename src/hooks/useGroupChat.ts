@@ -5,7 +5,16 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useE2ECrypto } from '@/hooks/useE2ECrypto';
 import { fetchPublicKey } from '@/utils/publicKeyManager';
-import type { ConversationParticipantWithProfile } from '@/types/supabaseJoins';
+
+// Define a proper type for the joined query result
+interface ParticipantWithProfile {
+  user_id: string;
+  profiles: {
+    id: string;
+    full_name: string | null;
+    avatar_url: string | null;
+  } | null;
+}
 
 export const useGroupChat = (refreshConversations: () => Promise<void>) => {
   const { user } = useAuth();
@@ -94,39 +103,37 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
         return [];
       }
 
-      // Check if the data has the expected structure
       if (!participants || !Array.isArray(participants)) {
         console.log('No participants data found');
         return [];
       }
 
-      // Improved type guard to handle SelectQueryError cases properly
-      const isValidParticipant = (p: any): p is ConversationParticipantWithProfile => {
+      // Enhanced type guard with proper error handling
+      const isValidParticipant = (p: any): p is ParticipantWithProfile => {
+        // Check if it's a basic participant structure
         if (!p || typeof p.user_id !== 'string') {
-          console.log('Invalid participant structure:', p);
           return false;
         }
         
-        // Handle cases where profiles might be null (valid case)
+        // If profiles is null, that's valid (user might not have profile)
         if (p.profiles === null) {
           return true;
         }
         
-        // Check if profiles is an error object (SelectQueryError)
+        // If profiles is an object, check if it's a valid profile or an error
         if (typeof p.profiles === 'object' && p.profiles !== null) {
-          // If it has an 'error' property, it's a SelectQueryError - filter it out
-          if ('error' in p.profiles) {
-            console.log('Profile query error for user:', p.user_id, p.profiles.error);
+          // Check for error indicators (SelectQueryError has error property)
+          if ('error' in p.profiles || 'message' in p.profiles || 'code' in p.profiles) {
+            console.log('Profile query error for user:', p.user_id);
             return false;
           }
           
-          // Check if it's a valid profile object with required structure
+          // Check if it has the basic profile structure
           if (typeof p.profiles.id === 'string') {
             return true;
           }
         }
         
-        console.log('Invalid profiles structure for user:', p.user_id, p.profiles);
         return false;
       };
 

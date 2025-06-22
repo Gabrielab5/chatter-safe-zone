@@ -2,10 +2,20 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import type { UserPresence } from '@/types/userPresence';
-import type { UserPresenceWithProfile } from '@/types/supabaseJoins';
 import { setUserOnlineStatus, setUserOfflineStatus } from '@/utils/presenceUtils';
 import { createPresenceSubscription } from '@/utils/presenceSubscription';
 import { createPresenceHeartbeat } from '@/utils/presenceHeartbeat';
+
+// Define a proper type for the joined query result
+interface UserPresenceWithProfile {
+  user_id: string;
+  is_online: boolean;
+  last_seen: string;
+  profiles: {
+    full_name: string | null;
+    avatar_url: string | null;
+  } | null;
+}
 
 export const useUserPresence = () => {
   const { user } = useAuth();
@@ -48,26 +58,26 @@ export const useUserPresence = () => {
       }
 
       if (mountedRef.current && data) {
-        // Improved type guard to handle SelectQueryError cases properly
+        // Enhanced type guard with proper error handling
         const isValidPresence = (p: any): p is UserPresenceWithProfile => {
+          // Check basic structure
           if (!p || 
               typeof p.user_id !== 'string' || 
               typeof p.is_online !== 'boolean' ||
               typeof p.last_seen !== 'string') {
-            console.log('Invalid presence structure:', p);
             return false;
           }
           
-          // Handle cases where profiles might be null (valid case)
+          // If profiles is null, that's valid (user might not have profile)
           if (p.profiles === null) {
             return true;
           }
           
-          // Check if profiles is an error object (SelectQueryError)
+          // If profiles is an object, check if it's a valid profile or an error
           if (typeof p.profiles === 'object' && p.profiles !== null) {
-            // If it has an 'error' property, it's a SelectQueryError - filter it out
-            if ('error' in p.profiles) {
-              console.log('Profile query error for user:', p.user_id, p.profiles.error);
+            // Check for error indicators (SelectQueryError has error property)
+            if ('error' in p.profiles || 'message' in p.profiles || 'code' in p.profiles) {
+              console.log('Profile query error for user:', p.user_id);
               return false;
             }
             
@@ -75,7 +85,6 @@ export const useUserPresence = () => {
             return true;
           }
           
-          console.log('Invalid profiles structure for user:', p.user_id, p.profiles);
           return false;
         };
 
