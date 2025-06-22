@@ -57,21 +57,12 @@ export const useE2ECrypto = () => {
     }
   }, []);
 
-  // Encrypt a message for a specific recipient
-  const encryptMessage = useCallback(async (plainText: string, recipientPublicKeyJWK: JsonWebKey): Promise<{ encryptedMessage: string; iv: string }> => {
+  // Encrypt a message for a specific recipient - now accepts CryptoKey instead of JsonWebKey
+  const encryptMessage = useCallback(async (plainText: string, recipientPublicKey: CryptoKey): Promise<{ encryptedMessage: string; iv: string }> => {
     setIsEncrypting(true);
     
     try {
       console.log('Encrypting message for recipient');
-      
-      // Import recipient's public key
-      const recipientPublicKey = await window.crypto.subtle.importKey(
-        "jwk",
-        recipientPublicKeyJWK,
-        { name: "RSA-OAEP", hash: "SHA-256" },
-        false,
-        ["encrypt"]
-      );
       
       // Convert message to Uint8Array
       const messageData = new TextEncoder().encode(plainText);
