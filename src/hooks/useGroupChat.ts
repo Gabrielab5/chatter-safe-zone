@@ -163,11 +163,15 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
       
       console.log(`Found ${validParticipants.length} valid participants out of ${participantsWithProfiles.length} total`);
 
-      return validParticipants.map(p => ({
-        id: p.user_id,
-        name: p.profiles?.full_name || 'Unknown User',
-        avatar_url: p.profiles?.avatar_url || undefined
-      }));
+      return validParticipants.map(p => {
+        // TypeScript now knows p is ParticipantWithProfile due to the type guard
+        const profile = p.profiles;
+        return {
+          id: p.user_id,
+          name: profile?.full_name || 'Unknown User',
+          avatar_url: profile?.avatar_url || undefined
+        };
+      });
     } catch (error) {
       console.error('Error in getGroupMembers:', error);
       return [];

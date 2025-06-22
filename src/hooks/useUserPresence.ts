@@ -116,13 +116,17 @@ export const useUserPresence = () => {
         
         console.log(`Found ${validPresenceData.length} valid presence records out of ${presenceWithProfiles.length} total`);
 
-        const usersWithProfiles = validPresenceData.map(presence => ({
-          user_id: presence.user_id,
-          is_online: presence.is_online,
-          last_seen: presence.last_seen,
-          full_name: presence.profiles?.full_name || undefined,
-          avatar_url: presence.profiles?.avatar_url || undefined
-        }));
+        const usersWithProfiles = validPresenceData.map(presence => {
+          // TypeScript now knows presence is UserPresenceWithProfile due to the type guard
+          const profile = presence.profiles;
+          return {
+            user_id: presence.user_id,
+            is_online: presence.is_online,
+            last_seen: presence.last_seen,
+            full_name: profile?.full_name || undefined,
+            avatar_url: profile?.avatar_url || undefined
+          };
+        });
         
         setOnlineUsers(usersWithProfiles);
       }
