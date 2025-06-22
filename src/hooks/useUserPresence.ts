@@ -108,13 +108,14 @@ export const useUserPresence = () => {
         console.log(`Found ${validPresenceData.length} valid presence records out of ${presenceWithProfiles.length} total`);
 
         const usersWithProfiles = validPresenceData.map(presence => {
-          // After type guard filtering, we know presence is UserPresenceWithProfile
+          // Type assertion after filtering to ensure TypeScript knows this is valid
+          const validPresence = presence as UserPresenceWithProfile;
           return {
-            user_id: presence.user_id,
-            is_online: presence.is_online,
-            last_seen: presence.last_seen,
-            full_name: presence.profiles?.full_name || undefined,
-            avatar_url: presence.profiles?.avatar_url || undefined
+            user_id: validPresence.user_id,
+            is_online: validPresence.is_online,
+            last_seen: validPresence.last_seen,
+            full_name: validPresence.profiles?.full_name || undefined,
+            avatar_url: validPresence.profiles?.avatar_url || undefined
           };
         });
         
