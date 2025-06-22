@@ -223,6 +223,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log('Attempting to sign up user:', email);
     
     try {
+      // First create the user account
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -235,6 +236,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       
       console.log('Sign up result:', { data, error });
+      
+      // If signup was successful and we got a user
+      if (!error && data.user) {
+        console.log('User created successfully, generating E2EE keys...');
+        
+        // Generate E2EE keys immediately for the new user
+        try {
+          // Generate a temporary password for E2EE encryption
+          // In a real app, you might want to prompt the user for this
+          const tempPassword = password; // Using the same password for simplicity
+          
+          await generateAndStoreKeys(data.user.id, tempPassword);
+          console.log('E2EE keys generated successfully for new user');
+          
+          // Also ensure public key is uploaded
+          setTimeout(() => {
+            ensurePublicKey(data.user.id);
+          }, 500);
+          
+        } catch (keyError) {
+          console.error('Failed to generate E2EE keys for new user:', keyError);
+          // Don't fail the registration if key generation fails
+        }
+      }
       
       // Log the registration attempt
       logRegistration(email, !error, error?.message);

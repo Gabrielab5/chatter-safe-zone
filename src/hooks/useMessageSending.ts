@@ -37,7 +37,7 @@ export const useMessageSending = (conversationId: string | null) => {
 
   // Server-side encryption fallback
   const encryptMessageServerSide = useCallback(async (content: string, convId: string): Promise<{ encryptedMessage: string; iv: string }> => {
-    console.log('Using server-side encryption fallback...');
+    console.log('Using server-side encryption for conversation:', convId);
     
     const { data, error } = await supabase.functions.invoke('encryption', {
       body: {
@@ -67,31 +67,29 @@ export const useMessageSending = (conversationId: string | null) => {
       
       let encryptedMessage: string;
       let iv: string;
-      let encryptionMethod = 'client-side';
+      let encryptionMethod = 'server-side'; // Default to server-side
 
       try {
-        // First, try client-side E2EE
+        // Try client-side E2EE first
         const recipientUserId = await getRecipientUserId(conversationId);
         const recipientPublicKey = await fetchPublicKey(recipientUserId);
         
-        console.log('Encrypting message using client-side E2EE...');
+        console.log('Attempting client-side E2EE encryption...');
         const clientEncryption = await encryptMessage(content, recipientPublicKey);
         encryptedMessage = clientEncryption.encryptedMessage;
         iv = clientEncryption.iv;
+        encryptionMethod = 'client-side';
+        console.log('Client-side E2EE encryption successful');
         
       } catch (keyError) {
-        console.log('Client-side encryption failed, falling back to server-side:', keyError.message);
+        console.log('Client-side E2EE failed, using server-side encryption:', keyError.message);
         
         // Fallback to server-side encryption
-        try {
-          const serverEncryption = await encryptMessageServerSide(content, conversationId);
-          encryptedMessage = serverEncryption.encryptedMessage;
-          iv = serverEncryption.iv;
-          encryptionMethod = 'server-side';
-        } catch (serverError) {
-          console.error('Server-side encryption also failed:', serverError);
-          throw new Error('Both client-side and server-side encryption failed. Message could not be sent securely.');
-        }
+        const serverEncryption = await encryptMessageServerSide(content, conversationId);
+        encryptedMessage = serverEncryption.encryptedMessage;
+        iv = serverEncryption.iv;
+        encryptionMethod = 'server-side';
+        console.log('Server-side encryption successful');
       }
       
       console.log(`Message encrypted using ${encryptionMethod} encryption, saving to database...`);
@@ -150,10 +148,8 @@ export const useMessageSending = (conversationId: string | null) => {
       
       if (error.message.includes('timeout')) {
         throw new Error('Message sending timed out. Please check your connection and try again.');
-      } else if (error.message.includes('Both client-side and server-side encryption failed')) {
-        throw error; // Re-throw the specific encryption error
       } else if (error.message.includes('encrypt')) {
-        throw new Error('Failed to encrypt message. The message was sent using server-side encryption instead.');
+        throw new Error('Failed to encrypt message. Please try again.');
       } else {
         throw new Error('Failed to send message. Please try again.');
       }
