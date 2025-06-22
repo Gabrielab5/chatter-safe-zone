@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
@@ -6,6 +7,7 @@ import { useE2ECrypto } from '@/hooks/useE2ECrypto';
 import { useToast } from '@/hooks/use-toast';
 import { generateKeyPair } from '@/utils/cryptoUtils';
 import { uploadPublicKey } from '@/utils/publicKeyManager';
+import { useNavigate } from 'react-router-dom';
 
 interface AuthContextType {
   user: User | null;
@@ -100,6 +102,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('Auth state changed:', event, session?.user?.email);
+        
+        // Handle password recovery
+        if (event === 'PASSWORD_RECOVERY') {
+          console.log('Password recovery event detected, redirecting to reset password page');
+          window.location.href = '/reset-password';
+          return;
+        }
+        
+        // Handle email verification
+        if (event === 'SIGNED_IN' && session?.user?.email_confirmed_at) {
+          console.log('Email verified successfully');
+          toast({
+            title: "Email Verified",
+            description: "Your email has been successfully verified!",
+          });
+        }
+        
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
@@ -234,7 +253,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           data: {
             full_name: fullName,
           },
-          emailRedirectTo: `${window.location.origin}/chat`
+          emailRedirectTo: `${window.location.origin}/login`
         }
       });
       
