@@ -5,6 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useE2ECrypto } from '@/hooks/useE2ECrypto';
 import { fetchPublicKey } from '@/utils/publicKeyManager';
+import type { ConversationParticipantWithProfile } from '@/types/supabaseJoins';
 
 export const useGroupChat = (refreshConversations: () => Promise<void>) => {
   const { user } = useAuth();
@@ -93,10 +94,12 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
         return [];
       }
 
-      return participants?.map(p => ({
+      const typedParticipants = participants as ConversationParticipantWithProfile[] | null;
+
+      return typedParticipants?.map(p => ({
         id: p.user_id,
-        name: (p.profiles as any)?.full_name || 'Unknown User',
-        avatar_url: (p.profiles as any)?.avatar_url
+        name: p.profiles?.full_name || 'Unknown User',
+        avatar_url: p.profiles?.avatar_url
       })) || [];
     } catch (error) {
       console.error('Error in getGroupMembers:', error);

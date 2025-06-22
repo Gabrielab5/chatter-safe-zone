@@ -1,7 +1,9 @@
+
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import type { UserPresence } from '@/types/userPresence';
+import type { UserPresenceWithProfile } from '@/types/supabaseJoins';
 import { setUserOnlineStatus, setUserOfflineStatus } from '@/utils/presenceUtils';
 import { createPresenceSubscription } from '@/utils/presenceSubscription';
 import { createPresenceHeartbeat } from '@/utils/presenceHeartbeat';
@@ -47,12 +49,13 @@ export const useUserPresence = () => {
       }
 
       if (mountedRef.current) {
-        const usersWithProfiles = data?.map(presence => ({
+        const typedData = data as UserPresenceWithProfile[] | null;
+        const usersWithProfiles = typedData?.map(presence => ({
           user_id: presence.user_id,
           is_online: presence.is_online,
           last_seen: presence.last_seen,
-          full_name: (presence.profiles as any)?.full_name,
-          avatar_url: (presence.profiles as any)?.avatar_url
+          full_name: presence.profiles?.full_name,
+          avatar_url: presence.profiles?.avatar_url
         })) || [];
         
         setOnlineUsers(usersWithProfiles);
