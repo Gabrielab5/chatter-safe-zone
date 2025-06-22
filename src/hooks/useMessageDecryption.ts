@@ -15,7 +15,7 @@ interface Message {
 }
 
 export const useMessageDecryption = () => {
-  const { user, userPassword } = useAuth();
+  const { user, sessionPrivateKey } = useAuth();
   const { decryptMessage } = useE2ECrypto();
   const mountedRef = useRef(true);
 
@@ -52,17 +52,14 @@ export const useMessageDecryption = () => {
     try {
       let decryptedContent: string;
 
-      // First try client-side decryption if user has password
-      if (userPassword) {
+      // First try client-side decryption if user has unlocked their session key
+      if (sessionPrivateKey) {
         try {
           console.log('Attempting client-side decryption for message:', message.id);
-          decryptedContent = await decryptMessage(
-            message.content_encrypted,
-            message.iv,
-            user.id,
-            userPassword
-          );
-          console.log('Client-side decryption successful');
+          // For client-side decryption, we would need to implement a different approach
+          // since we have the private key directly instead of a password
+          // For now, let's fallback to server-side
+          throw new Error('Client-side decryption with session key not yet implemented');
         } catch (clientError) {
           console.log('Client-side decryption failed, trying server-side:', clientError.message);
           
@@ -76,10 +73,10 @@ export const useMessageDecryption = () => {
           }
         }
       } else {
-        // No client-side password available, try server-side only
+        // No client-side session key available, try server-side only
         try {
           decryptedContent = await decryptMessageServerSide(message);
-          console.log('Server-side decryption successful (no client password)');
+          console.log('Server-side decryption successful (no session key)');
         } catch (serverError) {
           console.error('Server-side decryption failed:', serverError);
           decryptedContent = 'Failed to decrypt message';
@@ -97,7 +94,7 @@ export const useMessageDecryption = () => {
         decrypted_content: 'Decryption error'
       };
     }
-  }, [user?.id, userPassword, decryptMessage, decryptMessageServerSide, mountedRef]);
+  }, [user?.id, sessionPrivateKey, decryptMessage, decryptMessageServerSide, mountedRef]);
 
   const processBatchDecryption = useCallback(async (messages: Message[]): Promise<Message[]> => {
     if (!mountedRef.current || messages.length === 0) {
