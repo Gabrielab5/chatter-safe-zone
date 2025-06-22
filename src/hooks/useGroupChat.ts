@@ -160,7 +160,7 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
         const profiles = p.profiles;
         
         // Check if profiles is not null and is a valid profile object
-        if (profiles && typeof profiles === 'object' && 'full_name' in profiles) {
+        if (profiles !== null && typeof profiles === 'object' && 'full_name' in profiles) {
           return {
             id: p.user_id,
             name: profiles.full_name || 'Unknown User',

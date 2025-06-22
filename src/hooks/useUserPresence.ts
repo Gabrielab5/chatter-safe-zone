@@ -112,7 +112,7 @@ export const useUserPresence = () => {
           const profiles = presence.profiles;
           
           // Check if profiles is not null and is a valid profile object
-          if (profiles && typeof profiles === 'object' && 'full_name' in profiles) {
+          if (profiles !== null && typeof profiles === 'object' && 'full_name' in profiles) {
             return {
               user_id: presence.user_id,
               is_online: presence.is_online,
