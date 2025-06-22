@@ -35,24 +35,66 @@ export const useMessageSending = (conversationId: string | null) => {
     return data[0].user_id;
   }, [user?.id]);
 
+  // Server-side encryption fallback
+  const encryptMessageServerSide = useCallback(async (content: string, convId: string): Promise<{ encryptedMessage: string; iv: string }> => {
+    console.log('Using server-side encryption fallback...');
+    
+    const { data, error } = await supabase.functions.invoke('encryption', {
+      body: {
+        action: 'encrypt',
+        conversationId: convId,
+        message: content
+      }
+    });
+
+    if (error) {
+      throw new Error(`Server-side encryption failed: ${error.message}`);
+    }
+
+    return {
+      encryptedMessage: data.encrypted,
+      iv: data.iv
+    };
+  }, []);
+
   const sendMessage = useCallback(async (content: string): Promise<Message> => {
     if (!conversationId || !content.trim() || !user || !mountedRef.current) {
       throw new Error('Missing required parameters for sending message');
     }
 
     try {
-      console.log('Encrypting and sending message using client-side E2EE...');
+      console.log('Attempting to send message...');
       
-      // Get recipient's user ID
-      const recipientUserId = await getRecipientUserId(conversationId);
+      let encryptedMessage: string;
+      let iv: string;
+      let encryptionMethod = 'client-side';
+
+      try {
+        // First, try client-side E2EE
+        const recipientUserId = await getRecipientUserId(conversationId);
+        const recipientPublicKey = await fetchPublicKey(recipientUserId);
+        
+        console.log('Encrypting message using client-side E2EE...');
+        const clientEncryption = await encryptMessage(content, recipientPublicKey);
+        encryptedMessage = clientEncryption.encryptedMessage;
+        iv = clientEncryption.iv;
+        
+      } catch (keyError) {
+        console.log('Client-side encryption failed, falling back to server-side:', keyError.message);
+        
+        // Fallback to server-side encryption
+        try {
+          const serverEncryption = await encryptMessageServerSide(content, conversationId);
+          encryptedMessage = serverEncryption.encryptedMessage;
+          iv = serverEncryption.iv;
+          encryptionMethod = 'server-side';
+        } catch (serverError) {
+          console.error('Server-side encryption also failed:', serverError);
+          throw new Error('Both client-side and server-side encryption failed. Message could not be sent securely.');
+        }
+      }
       
-      // Fetch recipient's public key
-      const recipientPublicKey = await fetchPublicKey(recipientUserId);
-      
-      // Encrypt the message using client-side encryption
-      const { encryptedMessage, iv } = await encryptMessage(content, recipientPublicKey);
-      
-      console.log('Message encrypted, saving to database...');
+      console.log(`Message encrypted using ${encryptionMethod} encryption, saving to database...`);
       
       // Save encrypted message to database
       let retryCount = 0;
@@ -100,7 +142,7 @@ export const useMessageSending = (conversationId: string | null) => {
         decrypted_content: content
       };
       
-      console.log('Message sent and displayed successfully using client-side E2EE');
+      console.log(`Message sent successfully using ${encryptionMethod} encryption`);
       return newMessage;
 
     } catch (error) {
@@ -108,15 +150,15 @@ export const useMessageSending = (conversationId: string | null) => {
       
       if (error.message.includes('timeout')) {
         throw new Error('Message sending timed out. Please check your connection and try again.');
+      } else if (error.message.includes('Both client-side and server-side encryption failed')) {
+        throw error; // Re-throw the specific encryption error
       } else if (error.message.includes('encrypt')) {
-        throw new Error('Failed to encrypt message. Please check your E2EE setup.');
-      } else if (error.message.includes('public key')) {
-        throw new Error('Failed to find recipient\'s public key. They may need to set up E2EE.');
+        throw new Error('Failed to encrypt message. The message was sent using server-side encryption instead.');
       } else {
         throw new Error('Failed to send message. Please try again.');
       }
     }
-  }, [conversationId, user, getRecipientUserId, encryptMessage]);
+  }, [conversationId, user, getRecipientUserId, encryptMessage, encryptMessageServerSide]);
 
   return {
     sendMessage,
