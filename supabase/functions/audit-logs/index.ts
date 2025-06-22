@@ -8,11 +8,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const supabase = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-);
-
 serve(async (req) => {
   console.log('Audit logs function called:', req.method);
   
@@ -21,6 +16,11 @@ serve(async (req) => {
   }
 
   try {
+    // Create supabase client with appropriate key based on request type
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    let supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    let supabase = createClient(supabaseUrl, supabaseKey);
+
     // For POST requests (logging events), we don't need authentication
     if (req.method === 'POST') {
       const body = await req.json();
@@ -59,9 +59,21 @@ serve(async (req) => {
     }
 
     const token = authHeader.replace('Bearer ', '');
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    // Create client with anon key for user authentication
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+    const userSupabase = createClient(supabaseUrl, anonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader
+        }
+      }
+    });
+    
+    const { data: { user }, error: authError } = await userSupabase.auth.getUser(token);
     
     if (authError || !user) {
+      console.error('Authentication failed:', authError);
       throw new Error('Invalid authentication');
     }
 
@@ -92,7 +104,7 @@ serve(async (req) => {
       .range((page - 1) * limit, page * limit - 1);
 
     // Apply filters
-    if (eventType) {
+    if (eventType && eventType !== 'all') {
       query = query.eq('event_type', eventType);
     }
     
@@ -111,6 +123,7 @@ serve(async (req) => {
     const { data: logs, error: logsError } = await query;
 
     if (logsError) {
+      console.error('Logs query error:', logsError);
       throw logsError;
     }
 
@@ -119,7 +132,7 @@ serve(async (req) => {
       .from('audit_logs')
       .select('*', { count: 'exact', head: true });
 
-    if (eventType) countQuery = countQuery.eq('event_type', eventType);
+    if (eventType && eventType !== 'all') countQuery = countQuery.eq('event_type', eventType);
     if (userId) countQuery = countQuery.eq('user_id', userId);
     if (startDate) countQuery = countQuery.gte('created_at', startDate);
     if (endDate) countQuery = countQuery.lte('created_at', endDate);
@@ -127,7 +140,7 @@ serve(async (req) => {
     const { count } = await countQuery;
 
     return new Response(JSON.stringify({
-      logs,
+      logs: logs || [],
       pagination: {
         page,
         limit,
@@ -140,7 +153,11 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Audit logs error:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ 
+      error: error.message,
+      logs: [],
+      pagination: { page: 1, limit: 50, total: 0, pages: 0 }
+    }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });

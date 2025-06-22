@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Calendar, Filter, Eye } from 'lucide-react';
-import { useToast } from '@/components/ui/use-toast';
+import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 
 interface AuditLog {
@@ -45,7 +45,7 @@ const AuditLogs: React.FC = () => {
   });
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({
-    eventType: '',
+    eventType: 'all',
     userId: '',
     startDate: '',
     endDate: ''
@@ -60,18 +60,28 @@ const AuditLogs: React.FC = () => {
   const loadAuditLogs = async () => {
     setLoading(true);
     try {
+      // Get current session for authentication
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        throw new Error('Authentication required');
+      }
+
       const params = new URLSearchParams({
         page: pagination.page.toString(),
         limit: pagination.limit.toString(),
-        ...(filters.eventType && { eventType: filters.eventType }),
+        ...(filters.eventType !== 'all' && { eventType: filters.eventType }),
         ...(filters.userId && { userId: filters.userId }),
         ...(filters.startDate && { startDate: filters.startDate }),
         ...(filters.endDate && { endDate: filters.endDate })
       });
 
       const response = await supabase.functions.invoke('audit-logs', {
-        body: {},
-        method: 'GET'
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        }
       });
 
       if (response.error) {
@@ -79,15 +89,18 @@ const AuditLogs: React.FC = () => {
       }
 
       const data: AuditLogsResponse = response.data;
-      setLogs(data.logs);
-      setPagination(data.pagination);
-    } catch (error) {
+      setLogs(data.logs || []);
+      setPagination(data.pagination || { page: 1, limit: 50, total: 0, pages: 0 });
+    } catch (error: any) {
       console.error('Error loading audit logs:', error);
       toast({
         title: "Error",
-        description: "Failed to load audit logs. You may not have admin privileges.",
+        description: error.message || "Failed to load audit logs. You may not have admin privileges.",
         variant: "destructive",
       });
+      // Set empty state on error
+      setLogs([]);
+      setPagination({ page: 1, limit: 50, total: 0, pages: 0 });
     } finally {
       setLoading(false);
     }
@@ -143,7 +156,7 @@ const AuditLogs: React.FC = () => {
                 <SelectValue placeholder="All events" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All events</SelectItem>
+                <SelectItem value="all">All events</SelectItem>
                 <SelectItem value="login_success">Login Success</SelectItem>
                 <SelectItem value="login_failed">Login Failed</SelectItem>
                 <SelectItem value="mfa_enabled">MFA Enabled</SelectItem>
@@ -239,7 +252,7 @@ const AuditLogs: React.FC = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="font-mono text-sm">
-                      {log.ip_address}
+                      {log.ip_address || 'N/A'}
                     </TableCell>
                     <TableCell className="max-w-xs truncate">
                       <pre className="text-xs text-muted-foreground">
