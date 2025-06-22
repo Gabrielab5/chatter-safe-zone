@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
@@ -42,7 +41,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [hasE2EEKeys, setHasE2EEKeys] = useState(false);
   const [sessionPrivateKey, setSessionPrivateKey] = useState<CryptoKey | null>(null);
   const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
-  const [hasShownUnlockModal, setHasShownUnlockModal] = useState(false);
   
   const { generateAndStoreKeys, hasExistingKeys, retrieveStoredKeys, decryptPrivateKey } = useE2ECrypto();
   const { toast } = useToast();
@@ -133,11 +131,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const hasKeys = await hasExistingKeys(session.user.id);
           setHasE2EEKeys(hasKeys);
           
-          // Only show unlock modal if user has keys AND we haven't shown it yet AND they don't have session key
-          if (hasKeys && !hasShownUnlockModal && !sessionPrivateKey) {
-            setIsUnlockModalOpen(true);
-            setHasShownUnlockModal(true);
-          }
+          // Don't automatically show the unlock modal anymore
           
           const provider = session.user.app_metadata?.provider;
           if (provider === 'google') {
@@ -148,7 +142,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setHasE2EEKeys(false);
           setSessionPrivateKey(null);
           setIsUnlockModalOpen(false);
-          setHasShownUnlockModal(false);
         }
       }
     );
@@ -170,11 +163,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const hasKeys = await hasExistingKeys(session.user.id);
         setHasE2EEKeys(hasKeys);
         
-        // Only show unlock modal if user has keys AND we haven't shown it yet AND they don't have session key
-        if (hasKeys && !hasShownUnlockModal && !sessionPrivateKey) {
-          setIsUnlockModalOpen(true);
-          setHasShownUnlockModal(true);
-        }
+        // Don't automatically show the unlock modal on initial load either
       }
     });
 
@@ -182,7 +171,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('AuthProvider: Cleaning up auth listener');
       subscription.unsubscribe();
     };
-  }, [hasExistingKeys, hasShownUnlockModal, sessionPrivateKey]);
+  }, [hasExistingKeys]);
 
   const unlockKeys = async (password: string): Promise<boolean> => {
     if (!user?.id) {
