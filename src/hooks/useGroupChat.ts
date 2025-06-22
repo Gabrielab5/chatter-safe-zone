@@ -155,11 +155,13 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
       console.log(`Found ${validParticipants.length} valid participants out of ${participantsWithProfiles.length} total`);
 
       return validParticipants.map(p => {
-        // After filtering with type guard, we can safely access the properties
+        // After filtering with type guard, p is guaranteed to be ConversationParticipantWithProfile
+        // but we need to handle the case where profiles might be null
+        const profiles = p.profiles;
         return {
           id: p.user_id,
-          name: p.profiles?.full_name || 'Unknown User',
-          avatar_url: p.profiles?.avatar_url || undefined
+          name: profiles?.full_name || 'Unknown User',
+          avatar_url: profiles?.avatar_url || undefined
         };
       });
     } catch (error) {

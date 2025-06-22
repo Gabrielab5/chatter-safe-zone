@@ -108,13 +108,15 @@ export const useUserPresence = () => {
         console.log(`Found ${validPresenceData.length} valid presence records out of ${presenceWithProfiles.length} total`);
 
         const usersWithProfiles = validPresenceData.map(presence => {
-          // After filtering with type guard, we can safely access the properties
+          // After filtering with type guard, presence is guaranteed to be UserPresenceWithProfile
+          // but we need to handle the case where profiles might be null
+          const profiles = presence.profiles;
           return {
             user_id: presence.user_id,
             is_online: presence.is_online,
             last_seen: presence.last_seen,
-            full_name: presence.profiles?.full_name || undefined,
-            avatar_url: presence.profiles?.avatar_url || undefined
+            full_name: profiles?.full_name || undefined,
+            avatar_url: profiles?.avatar_url || undefined
           };
         });
         
