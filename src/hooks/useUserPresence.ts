@@ -111,15 +111,24 @@ export const useUserPresence = () => {
           // but we need to handle the case where profiles might be null
           const profiles = presence.profiles;
           
-          // Additional type check to ensure profiles is not an error object
-          const isValidProfile = profiles && typeof profiles === 'object' && 'full_name' in profiles;
+          // Check if profiles is not null and is a valid profile object
+          if (profiles && typeof profiles === 'object' && 'full_name' in profiles) {
+            return {
+              user_id: presence.user_id,
+              is_online: presence.is_online,
+              last_seen: presence.last_seen,
+              full_name: profiles.full_name || undefined,
+              avatar_url: profiles.avatar_url || undefined
+            };
+          }
           
+          // Fallback for null or invalid profiles
           return {
             user_id: presence.user_id,
             is_online: presence.is_online,
             last_seen: presence.last_seen,
-            full_name: isValidProfile ? profiles.full_name || undefined : undefined,
-            avatar_url: isValidProfile ? profiles.avatar_url || undefined : undefined
+            full_name: undefined,
+            avatar_url: undefined
           };
         });
         

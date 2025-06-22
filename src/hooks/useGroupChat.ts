@@ -159,13 +159,20 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
         // but we need to handle the case where profiles might be null
         const profiles = p.profiles;
         
-        // Additional type check to ensure profiles is not an error object
-        const isValidProfile = profiles && typeof profiles === 'object' && 'full_name' in profiles;
+        // Check if profiles is not null and is a valid profile object
+        if (profiles && typeof profiles === 'object' && 'full_name' in profiles) {
+          return {
+            id: p.user_id,
+            name: profiles.full_name || 'Unknown User',
+            avatar_url: profiles.avatar_url || undefined
+          };
+        }
         
+        // Fallback for null or invalid profiles
         return {
           id: p.user_id,
-          name: isValidProfile ? profiles.full_name || 'Unknown User' : 'Unknown User',
-          avatar_url: isValidProfile ? profiles.avatar_url || undefined : undefined
+          name: 'Unknown User',
+          avatar_url: undefined
         };
       });
     } catch (error) {
