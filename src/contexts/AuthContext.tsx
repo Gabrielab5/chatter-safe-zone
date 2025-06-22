@@ -5,6 +5,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { logLoginAttempt, logRegistration, logGoogleAuth, logLogout } from '@/utils/auditLogger';
 import { useE2ECrypto } from '@/hooks/useE2ECrypto';
 import { useToast } from '@/hooks/use-toast';
+import { generateKeyPair } from '@/utils/cryptoUtils';
+import { uploadPublicKey } from '@/utils/publicKeyManager';
 
 interface AuthContextType {
   user: User | null;
@@ -43,6 +45,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { generateAndStoreKeys, hasExistingKeys, retrieveStoredKeys, decryptPrivateKey } = useE2ECrypto();
   const { toast } = useToast();
 
+  // Function to ensure user has public key in profile
+  const ensurePublicKey = async (userId: string) => {
+    try {
+      console.log('Checking if user has public key:', userId);
+      
+      // Check if user already has a public key
+      const { data: profile, error: fetchError } = await supabase
+        .from('profiles')
+        .select('public_key')
+        .eq('id', userId)
+        .single();
+
+      if (fetchError) {
+        console.error('Error fetching user profile:', fetchError);
+        return;
+      }
+
+      // If user already has a public key, no need to generate
+      if (profile?.public_key) {
+        console.log('User already has public key');
+        return;
+      }
+
+      console.log('Generating new key pair for user');
+      
+      // Generate new key pair
+      const keyPair = await generateKeyPair();
+      
+      // Upload public key to Supabase
+      await uploadPublicKey(userId, keyPair.publicKey);
+      
+      console.log('Public key successfully uploaded for user:', userId);
+      
+      toast({
+        title: "Encryption Keys Generated",
+        description: "Your account is now ready for secure messaging.",
+      });
+      
+    } catch (error) {
+      console.error('Error ensuring public key:', error);
+      toast({
+        title: "Key Generation Warning",
+        description: "Failed to generate encryption keys. Some features may not work properly.",
+        variant: "destructive"
+      });
+    }
+  };
+
   useEffect(() => {
     console.log('AuthProvider: Setting up auth listener');
     
@@ -56,6 +106,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // Check for E2EE keys when user signs in
         if (event === 'SIGNED_IN' && session?.user) {
+          // Ensure user has a public key
+          setTimeout(() => {
+            ensurePublicKey(session.user.id);
+          }, 100);
+          
           const hasKeys = await hasExistingKeys(session.user.id);
           setHasE2EEKeys(hasKeys);
           
@@ -86,6 +141,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // Check for E2EE keys on initial load
       if (session?.user) {
+        // Ensure user has a public key
+        setTimeout(() => {
+          ensurePublicKey(session.user.id);
+        }, 100);
+        
         const hasKeys = await hasExistingKeys(session.user.id);
         setHasE2EEKeys(hasKeys);
         
