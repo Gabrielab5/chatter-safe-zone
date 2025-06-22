@@ -1,4 +1,3 @@
-
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -111,12 +110,16 @@ export const useUserPresence = () => {
           // After filtering with type guard, presence is guaranteed to be UserPresenceWithProfile
           // but we need to handle the case where profiles might be null
           const profiles = presence.profiles;
+          
+          // Additional type check to ensure profiles is not an error object
+          const isValidProfile = profiles && typeof profiles === 'object' && 'full_name' in profiles;
+          
           return {
             user_id: presence.user_id,
             is_online: presence.is_online,
             last_seen: presence.last_seen,
-            full_name: profiles?.full_name || undefined,
-            avatar_url: profiles?.avatar_url || undefined
+            full_name: isValidProfile ? profiles.full_name || undefined : undefined,
+            avatar_url: isValidProfile ? profiles.avatar_url || undefined : undefined
           };
         });
         

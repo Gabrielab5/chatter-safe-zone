@@ -158,10 +158,14 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
         // After filtering with type guard, p is guaranteed to be ConversationParticipantWithProfile
         // but we need to handle the case where profiles might be null
         const profiles = p.profiles;
+        
+        // Additional type check to ensure profiles is not an error object
+        const isValidProfile = profiles && typeof profiles === 'object' && 'full_name' in profiles;
+        
         return {
           id: p.user_id,
-          name: profiles?.full_name || 'Unknown User',
-          avatar_url: profiles?.avatar_url || undefined
+          name: isValidProfile ? profiles.full_name || 'Unknown User' : 'Unknown User',
+          avatar_url: isValidProfile ? profiles.avatar_url || undefined : undefined
         };
       });
     } catch (error) {
