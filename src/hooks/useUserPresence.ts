@@ -49,26 +49,47 @@ export const useUserPresence = () => {
       }
 
       if (mountedRef.current && data) {
-        // Type guard to check if the presence data has the expected structure
+        // Improved type guard to handle SelectQueryError cases
         const isValidPresence = (p: any): p is UserPresenceWithProfile => {
-          return p && 
-                 typeof p.user_id === 'string' && 
-                 typeof p.is_online === 'boolean' &&
-                 typeof p.last_seen === 'string' &&
-                 (p.profiles === null || 
-                  (typeof p.profiles === 'object' &&
-                   !('error' in p.profiles))); // Ensure it's not a SelectQueryError
+          if (!p || 
+              typeof p.user_id !== 'string' || 
+              typeof p.is_online !== 'boolean' ||
+              typeof p.last_seen !== 'string') {
+            console.log('Invalid presence structure:', p);
+            return false;
+          }
+          
+          // Handle cases where profiles might be null or an error object
+          if (p.profiles === null) {
+            return true; // Valid case - no profile found
+          }
+          
+          if (typeof p.profiles === 'object' && p.profiles !== null) {
+            // Check if it's an error object
+            if ('error' in p.profiles) {
+              console.log('Profile query error for user:', p.user_id, p.profiles.error);
+              return false;
+            }
+            
+            // It's a valid profile object (we don't need to check specific fields)
+            return true;
+          }
+          
+          console.log('Invalid profiles structure for user:', p.user_id, p.profiles);
+          return false;
         };
 
-        const usersWithProfiles = data
-          .filter(isValidPresence)
-          .map(presence => ({
-            user_id: presence.user_id,
-            is_online: presence.is_online,
-            last_seen: presence.last_seen,
-            full_name: presence.profiles?.full_name,
-            avatar_url: presence.profiles?.avatar_url
-          }));
+        const validPresenceData = data.filter(isValidPresence);
+        
+        console.log(`Found ${validPresenceData.length} valid presence records out of ${data.length} total`);
+
+        const usersWithProfiles = validPresenceData.map(presence => ({
+          user_id: presence.user_id,
+          is_online: presence.is_online,
+          last_seen: presence.last_seen,
+          full_name: presence.profiles?.full_name,
+          avatar_url: presence.profiles?.avatar_url
+        }));
         
         setOnlineUsers(usersWithProfiles);
       }

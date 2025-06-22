@@ -18,3 +18,16 @@ export interface UserPresenceWithProfile {
     avatar_url: string | null;
   } | null;
 }
+
+// Union types that handle both success and error cases from Supabase
+export type ConversationParticipantQueryResult = ConversationParticipantWithProfile | {
+  user_id: string;
+  profiles: { error: string };
+};
+
+export type UserPresenceQueryResult = UserPresenceWithProfile | {
+  user_id: string;
+  is_online: boolean;
+  last_seen: string;
+  profiles: { error: string };
+};

@@ -96,26 +96,48 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
 
       // Check if the data has the expected structure
       if (!participants || !Array.isArray(participants)) {
+        console.log('No participants data found');
         return [];
       }
 
-      // Type guard to check if the participant has the expected profile structure
+      // Improved type guard to handle SelectQueryError cases
       const isValidParticipant = (p: any): p is ConversationParticipantWithProfile => {
-        return p && 
-               typeof p.user_id === 'string' && 
-               (p.profiles === null || 
-                (typeof p.profiles === 'object' && 
-                 typeof p.profiles.id === 'string' &&
-                 !('error' in p.profiles))); // Ensure it's not a SelectQueryError
+        if (!p || typeof p.user_id !== 'string') {
+          console.log('Invalid participant structure:', p);
+          return false;
+        }
+        
+        // Handle cases where profiles might be null or an error object
+        if (p.profiles === null) {
+          return true; // Valid case - no profile found
+        }
+        
+        if (typeof p.profiles === 'object' && p.profiles !== null) {
+          // Check if it's an error object
+          if ('error' in p.profiles) {
+            console.log('Profile query error for user:', p.user_id, p.profiles.error);
+            return false;
+          }
+          
+          // Check if it's a valid profile object
+          if (typeof p.profiles.id === 'string') {
+            return true;
+          }
+        }
+        
+        console.log('Invalid profiles structure for user:', p.user_id, p.profiles);
+        return false;
       };
 
-      return participants
-        .filter(isValidParticipant)
-        .map(p => ({
-          id: p.user_id,
-          name: p.profiles?.full_name || 'Unknown User',
-          avatar_url: p.profiles?.avatar_url
-        }));
+      const validParticipants = participants.filter(isValidParticipant);
+      
+      console.log(`Found ${validParticipants.length} valid participants out of ${participants.length} total`);
+
+      return validParticipants.map(p => ({
+        id: p.user_id,
+        name: p.profiles?.full_name || 'Unknown User',
+        avatar_url: p.profiles?.avatar_url
+      }));
     } catch (error) {
       console.error('Error in getGroupMembers:', error);
       return [];
