@@ -1,4 +1,3 @@
-
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -49,7 +48,7 @@ export const useUserPresence = () => {
       }
 
       if (mountedRef.current && data) {
-        // Improved type guard to handle SelectQueryError cases
+        // Improved type guard to handle SelectQueryError cases properly
         const isValidPresence = (p: any): p is UserPresenceWithProfile => {
           if (!p || 
               typeof p.user_id !== 'string' || 
@@ -59,19 +58,20 @@ export const useUserPresence = () => {
             return false;
           }
           
-          // Handle cases where profiles might be null or an error object
+          // Handle cases where profiles might be null (valid case)
           if (p.profiles === null) {
-            return true; // Valid case - no profile found
+            return true;
           }
           
+          // Check if profiles is an error object (SelectQueryError)
           if (typeof p.profiles === 'object' && p.profiles !== null) {
-            // Check if it's an error object
+            // If it has an 'error' property, it's a SelectQueryError - filter it out
             if ('error' in p.profiles) {
               console.log('Profile query error for user:', p.user_id, p.profiles.error);
               return false;
             }
             
-            // It's a valid profile object (we don't need to check specific fields)
+            // It's a valid profile object (we don't need to check specific fields since they're optional)
             return true;
           }
           
