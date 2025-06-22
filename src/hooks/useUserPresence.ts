@@ -56,7 +56,8 @@ export const useUserPresence = () => {
                  typeof p.is_online === 'boolean' &&
                  typeof p.last_seen === 'string' &&
                  (p.profiles === null || 
-                  (typeof p.profiles === 'object'));
+                  (typeof p.profiles === 'object' &&
+                   !('error' in p.profiles))); // Ensure it's not a SelectQueryError
         };
 
         const usersWithProfiles = data

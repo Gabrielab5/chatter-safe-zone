@@ -105,7 +105,8 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
                typeof p.user_id === 'string' && 
                (p.profiles === null || 
                 (typeof p.profiles === 'object' && 
-                 typeof p.profiles.id === 'string'));
+                 typeof p.profiles.id === 'string' &&
+                 !('error' in p.profiles))); // Ensure it's not a SelectQueryError
       };
 
       return participants
