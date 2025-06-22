@@ -5,16 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useE2ECrypto } from '@/hooks/useE2ECrypto';
 import { fetchPublicKey } from '@/utils/publicKeyManager';
-
-// Define a proper type for the joined query result
-interface ParticipantWithProfile {
-  user_id: string;
-  profiles: {
-    id: string;
-    full_name: string | null;
-    avatar_url: string | null;
-  } | null;
-}
+import { ConversationParticipantWithProfile } from '@/types/supabaseJoins';
 
 export const useGroupChat = (refreshConversations: () => Promise<void>) => {
   const { user } = useAuth();
@@ -131,7 +122,7 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
       }
 
       // Enhanced type guard to handle both valid profiles and errors
-      const isValidParticipant = (p: any): p is ParticipantWithProfile => {
+      const isValidParticipant = (p: any): p is ConversationParticipantWithProfile => {
         // Check if it's a basic participant structure
         if (!p || typeof p.user_id !== 'string') {
           return false;
@@ -164,12 +155,11 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
       console.log(`Found ${validParticipants.length} valid participants out of ${participantsWithProfiles.length} total`);
 
       return validParticipants.map(p => {
-        // TypeScript now knows p is ParticipantWithProfile due to the type guard
-        const profile = p.profiles;
+        // After type guard filtering, we know p is ConversationParticipantWithProfile
         return {
           id: p.user_id,
-          name: profile?.full_name || 'Unknown User',
-          avatar_url: profile?.avatar_url || undefined
+          name: p.profiles?.full_name || 'Unknown User',
+          avatar_url: p.profiles?.avatar_url || undefined
         };
       });
     } catch (error) {

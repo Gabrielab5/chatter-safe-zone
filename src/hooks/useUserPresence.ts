@@ -1,3 +1,4 @@
+
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -5,17 +6,7 @@ import type { UserPresence } from '@/types/userPresence';
 import { setUserOnlineStatus, setUserOfflineStatus } from '@/utils/presenceUtils';
 import { createPresenceSubscription } from '@/utils/presenceSubscription';
 import { createPresenceHeartbeat } from '@/utils/presenceHeartbeat';
-
-// Define a proper type for the joined query result
-interface UserPresenceWithProfile {
-  user_id: string;
-  is_online: boolean;
-  last_seen: string;
-  profiles: {
-    full_name: string | null;
-    avatar_url: string | null;
-  } | null;
-}
+import { UserPresenceWithProfile } from '@/types/supabaseJoins';
 
 export const useUserPresence = () => {
   const { user } = useAuth();
@@ -117,14 +108,13 @@ export const useUserPresence = () => {
         console.log(`Found ${validPresenceData.length} valid presence records out of ${presenceWithProfiles.length} total`);
 
         const usersWithProfiles = validPresenceData.map(presence => {
-          // TypeScript now knows presence is UserPresenceWithProfile due to the type guard
-          const profile = presence.profiles;
+          // After type guard filtering, we know presence is UserPresenceWithProfile
           return {
             user_id: presence.user_id,
             is_online: presence.is_online,
             last_seen: presence.last_seen,
-            full_name: profile?.full_name || undefined,
-            avatar_url: profile?.avatar_url || undefined
+            full_name: presence.profiles?.full_name || undefined,
+            avatar_url: presence.profiles?.avatar_url || undefined
           };
         });
         
