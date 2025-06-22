@@ -1,4 +1,3 @@
-
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -35,7 +34,7 @@ export const useUserPresence = () => {
           user_id,
           is_online,
           last_seen,
-          profiles!user_presence_user_id_fkey(
+          profiles(
             full_name,
             avatar_url
           )
@@ -52,8 +51,8 @@ export const useUserPresence = () => {
           user_id: presence.user_id,
           is_online: presence.is_online,
           last_seen: presence.last_seen,
-          full_name: presence.profiles?.full_name,
-          avatar_url: presence.profiles?.avatar_url
+          full_name: (presence.profiles as any)?.full_name,
+          avatar_url: (presence.profiles as any)?.avatar_url
         })) || [];
         
         setOnlineUsers(usersWithProfiles);
