@@ -111,14 +111,14 @@ export const useUserPresence = () => {
           // but we need to handle the case where profiles might be null
           const profiles = presence.profiles;
           
-          // Check if profiles is not null and is a valid profile object
-          if (profiles !== null && typeof profiles === 'object' && 'full_name' in profiles) {
+          // Check if profiles is valid and has the required properties
+          if (profiles !== null && typeof profiles === 'object' && profiles && 'full_name' in profiles) {
             return {
               user_id: presence.user_id,
               is_online: presence.is_online,
               last_seen: presence.last_seen,
-              full_name: profiles.full_name || undefined,
-              avatar_url: profiles.avatar_url || undefined
+              full_name: (profiles as any).full_name || undefined,
+              avatar_url: (profiles as any).avatar_url || undefined
             };
           }
           
