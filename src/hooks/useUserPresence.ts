@@ -48,15 +48,26 @@ export const useUserPresence = () => {
         return;
       }
 
-      if (mountedRef.current) {
-        const typedData = data as UserPresenceWithProfile[] | null;
-        const usersWithProfiles = typedData?.map(presence => ({
-          user_id: presence.user_id,
-          is_online: presence.is_online,
-          last_seen: presence.last_seen,
-          full_name: presence.profiles?.full_name,
-          avatar_url: presence.profiles?.avatar_url
-        })) || [];
+      if (mountedRef.current && data) {
+        // Type guard to check if the presence data has the expected structure
+        const isValidPresence = (p: any): p is UserPresenceWithProfile => {
+          return p && 
+                 typeof p.user_id === 'string' && 
+                 typeof p.is_online === 'boolean' &&
+                 typeof p.last_seen === 'string' &&
+                 (p.profiles === null || 
+                  (typeof p.profiles === 'object'));
+        };
+
+        const usersWithProfiles = data
+          .filter(isValidPresence)
+          .map(presence => ({
+            user_id: presence.user_id,
+            is_online: presence.is_online,
+            last_seen: presence.last_seen,
+            full_name: presence.profiles?.full_name,
+            avatar_url: presence.profiles?.avatar_url
+          }));
         
         setOnlineUsers(usersWithProfiles);
       }

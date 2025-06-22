@@ -94,13 +94,27 @@ export const useGroupChat = (refreshConversations: () => Promise<void>) => {
         return [];
       }
 
-      const typedParticipants = participants as ConversationParticipantWithProfile[] | null;
+      // Check if the data has the expected structure
+      if (!participants || !Array.isArray(participants)) {
+        return [];
+      }
 
-      return typedParticipants?.map(p => ({
-        id: p.user_id,
-        name: p.profiles?.full_name || 'Unknown User',
-        avatar_url: p.profiles?.avatar_url
-      })) || [];
+      // Type guard to check if the participant has the expected profile structure
+      const isValidParticipant = (p: any): p is ConversationParticipantWithProfile => {
+        return p && 
+               typeof p.user_id === 'string' && 
+               (p.profiles === null || 
+                (typeof p.profiles === 'object' && 
+                 typeof p.profiles.id === 'string'));
+      };
+
+      return participants
+        .filter(isValidParticipant)
+        .map(p => ({
+          id: p.user_id,
+          name: p.profiles?.full_name || 'Unknown User',
+          avatar_url: p.profiles?.avatar_url
+        }));
     } catch (error) {
       console.error('Error in getGroupMembers:', error);
       return [];
