@@ -138,7 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const keyPair = await generateKeyPair();
 
-      await uploadPrivateKey(userId, keyPair.privateKey, password);
+      await uploadPrivateKey(userId, keyPair.privateKey);
 
       console.log("✅ Private key uploaded for user:", userId);
 
