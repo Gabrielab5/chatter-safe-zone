@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,7 +13,6 @@ import { useToast } from "@/hooks/use-toast";
 import { generateKeyPair } from "@/utils/cryptoUtils";
 import { uploadPublicKey } from "@/utils/publicKeyManager";
 import { uploadPrivateKey } from "@/utils/privateKeyManager";
-import { useNavigate } from "react-router-dom";
 
 interface AuthContextType {
   user: User | null;
@@ -111,6 +111,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       });
     }
   };
+  
   const ensurePrivateKey = async (userId: string, password: string) => {
     try {
       console.log("🔐 Checking if user has private key:", userId);
@@ -137,7 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
       const keyPair = await generateKeyPair();
 
-      await uploadPrivateKey(userId, keyPair.privateKey, password);
+      await uploadPrivateKey(userId, keyPair.privateKey);
 
       console.log("✅ Private key uploaded for user:", userId);
 
@@ -154,6 +155,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       });
     }
   };
+  
   useEffect(() => {
     console.log("AuthProvider: Setting up auth listener");
 
@@ -196,8 +198,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         const hasKeys = await hasExistingKeys(session.user.id);
         setHasE2EEKeys(hasKeys);
 
-        // Don't automatically show the unlock modal anymore
-
         const provider = session.user.app_metadata?.provider;
         if (provider === "google") {
           console.log("Google auth successful, logging event");
@@ -226,8 +226,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
         const hasKeys = await hasExistingKeys(session.user.id);
         setHasE2EEKeys(hasKeys);
-
-        // Don't automatically show the unlock modal on initial load either
       }
     });
 
