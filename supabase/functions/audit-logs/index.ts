@@ -6,6 +6,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.8';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
 };
 
 serve(async (req) => {
@@ -127,10 +128,10 @@ serve(async (req) => {
         });
       }
 
-      // Check if user is admin (simplified check - you may want to enhance this)
+      // Check if user is admin
       const isAdmin = user.email?.includes('admin') || 
                      user.user_metadata?.full_name?.toLowerCase().includes('admin') ||
-                     user.email === 'mohamed.alfker4@gmail.com'; // Allow your specific email
+                     user.email === 'mohamed.alfker4@gmail.com';
       
       if (!isAdmin) {
         console.error('User is not admin:', user.email);
@@ -147,14 +148,14 @@ serve(async (req) => {
       // Use service role key for database queries
       const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-      // Parse query parameters
+      // Parse query parameters with proper error handling
       const url = new URL(req.url);
-      const page = Math.max(1, parseInt(url.searchParams.get('page') || '1'));
-      const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '50')));
-      const eventType = url.searchParams.get('eventType');
-      const userId = url.searchParams.get('userId');
-      const startDate = url.searchParams.get('startDate');
-      const endDate = url.searchParams.get('endDate');
+      const page = Math.max(1, parseInt(url.searchParams.get('page') || '1') || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '50') || 50));
+      const eventType = url.searchParams.get('eventType') || '';
+      const userId = url.searchParams.get('userId') || '';
+      const startDate = url.searchParams.get('startDate') || '';
+      const endDate = url.searchParams.get('endDate') || '';
 
       console.log('Query parameters:', { page, limit, eventType, userId, startDate, endDate });
 
@@ -171,7 +172,7 @@ serve(async (req) => {
         .order('created_at', { ascending: false })
         .range((page - 1) * limit, page * limit - 1);
 
-      // Apply filters
+      // Apply filters only if they are non-empty
       if (eventType && eventType !== 'all' && eventType.trim() !== '') {
         query = query.eq('event_type', eventType);
       }
