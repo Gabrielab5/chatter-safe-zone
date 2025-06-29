@@ -117,22 +117,66 @@ serve(async (req) => {
 
   try {
     const authHeader = req.headers.get("Authorization");
+    console.log("🔐 Auth header present:", !!authHeader);
+    
     if (!authHeader) {
-      throw new Error("No authorization header");
+      console.log("❌ No authorization header");
+      return new Response(
+        JSON.stringify({ error: "No authorization header" }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     const token = authHeader.replace("Bearer ", "");
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      throw new Error("Invalid authentication");
+    console.log("🔐 Token extracted, length:", token.length);
+    
+    // Try to get user with better error handling
+    let user;
+    try {
+      const { data: userData, error: authError } = await supabase.auth.getUser(token);
+      
+      if (authError) {
+        console.log("❌ Auth error:", authError.message);
+        return new Response(
+          JSON.stringify({ error: `Authentication failed: ${authError.message}` }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+      
+      if (!userData?.user) {
+        console.log("❌ No user data returned");
+        return new Response(
+          JSON.stringify({ error: "No user found" }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+      
+      user = userData.user;
+      console.log("✅ User authenticated:", user.id);
+    } catch (error) {
+      console.log("❌ Exception during auth:", error.message);
+      return new Response(
+        JSON.stringify({ error: `Authentication exception: ${error.message}` }),
+        {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     const { action, conversationId, message, encryptedMessage, iv } =
       await req.json();
+
+    console.log("🔐 Action:", action, "ConversationId:", conversationId);
 
     if (action === "encrypt") {
       // Get or create session key for conversation
@@ -181,27 +225,91 @@ serve(async (req) => {
     }
 
     if (action === "decrypt") {
-      // Verify user has access to conversation
-      const { data: participant } = await supabase
-        .from("conversation_participants")
-        .select("*")
-        .eq("conversation_id", conversationId)
-        .eq("user_id", user.id)
-        .single();
+      // Verify user has access to conversation with better error handling
+      try {
+        const { data: participant, error: participantError } = await supabase
+          .from("conversation_participants")
+          .select("*")
+          .eq("conversation_id", conversationId)
+          .eq("user_id", user.id)
+          .single();
 
-      if (!participant) {
-        throw new Error("Unauthorized access to conversation");
+        if (participantError) {
+          console.log("❌ Participant check error:", participantError.message);
+          return new Response(
+            JSON.stringify({ error: `Access check failed: ${participantError.message}` }),
+            {
+              status: 403,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        if (!participant) {
+          console.log("❌ User not participant in conversation");
+          return new Response(
+            JSON.stringify({ error: "Unauthorized access to conversation" }),
+            {
+              status: 403,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        console.log("✅ User is participant in conversation");
+      } catch (error) {
+        console.log("❌ Exception during participant check:", error.message);
+        return new Response(
+          JSON.stringify({ error: `Participant check exception: ${error.message}` }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
       }
 
-      // Get session key
-      const { data: conversation } = await supabase
-        .from("conversations")
-        .select("session_key_encrypted")
-        .eq("id", conversationId)
-        .single();
+      // Get session key with better error handling
+      let conversation;
+      try {
+        const { data: conversationData, error: conversationError } = await supabase
+          .from("conversations")
+          .select("session_key_encrypted")
+          .eq("id", conversationId)
+          .single();
+
+        if (conversationError) {
+          console.log("❌ Conversation fetch error:", conversationError.message);
+          return new Response(
+            JSON.stringify({ error: `Conversation fetch failed: ${conversationError.message}` }),
+            {
+              status: 404,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            }
+          );
+        }
+
+        conversation = conversationData;
+        console.log("✅ Conversation fetched");
+      } catch (error) {
+        console.log("❌ Exception during conversation fetch:", error.message);
+        return new Response(
+          JSON.stringify({ error: `Conversation fetch exception: ${error.message}` }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
 
       if (!conversation?.session_key_encrypted) {
-        throw new Error("No session key found");
+        console.log("❌ No session key found");
+        return new Response(
+          JSON.stringify({ error: "No session key found" }),
+          {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
       }
 
       console.log("🔐 EncryptedMessage:", encryptedMessage);
@@ -259,15 +367,28 @@ serve(async (req) => {
       });
     }
 
-    throw new Error("Invalid action");
+    return new Response(
+      JSON.stringify({ error: "Invalid action" }),
+      {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
+
   } catch (error) {
     console.error(
       "Encryption error:",
       JSON.stringify(error, Object.getOwnPropertyNames(error))
     );
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ 
+        error: error.message || "Internal server error",
+        details: error.stack || "No stack trace available"
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   }
 });
