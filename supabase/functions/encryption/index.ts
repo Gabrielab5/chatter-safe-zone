@@ -61,6 +61,11 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
+// Check if a string is a valid hex string
+function isValidHex(str: string): boolean {
+  return /^[0-9a-fA-F]+$/.test(str) && str.length % 2 === 0;
+}
+
 async function encryptMessage(
   message: string,
   key: Uint8Array
@@ -189,16 +194,30 @@ serve(async (req) => {
       let sessionKey: Uint8Array;
 
       if (conversation?.session_key_encrypted) {
-        // Try to decrypt existing session key - handle both hex and base64 formats
-        try {
-          // First try as hex (our current format)
-          sessionKey = hexToUint8Array(conversation.session_key_encrypted);
-        } catch {
-          // Fallback to base64 if hex parsing fails
-          sessionKey = base64ToUint8Array(conversation.session_key_encrypted);
+        const storedKey = conversation.session_key_encrypted;
+        console.log("🔑 Found stored key:", storedKey);
+
+        // Check if it's a valid hex string and proper length
+        if (isValidHex(storedKey) && storedKey.length === 64) {
+          // Valid 32-byte hex key
+          sessionKey = hexToUint8Array(storedKey);
+          console.log("✅ Using existing valid session key");
+        } else {
+          // Invalid key (like "temp_key"), generate a new one
+          console.log("⚠️ Invalid session key detected, generating new one");
+          sessionKey = generateKey();
+          
+          // Update with the new key
+          await supabase
+            .from("conversations")
+            .update({ session_key_encrypted: uint8ArrayToHex(sessionKey) })
+            .eq("id", conversationId);
+          
+          console.log("✅ Updated conversation with new session key");
         }
       } else {
         // Generate new session key
+        console.log("🔑 Generating new session key");
         sessionKey = generateKey();
 
         // Store encrypted session key as hex
@@ -206,6 +225,8 @@ serve(async (req) => {
           .from("conversations")
           .update({ session_key_encrypted: uint8ArrayToHex(sessionKey) })
           .eq("id", conversationId);
+        
+        console.log("✅ Stored new session key");
       }
 
       const result = await encryptMessage(message, sessionKey);
@@ -304,7 +325,7 @@ serve(async (req) => {
       if (!conversation?.session_key_encrypted) {
         console.log("❌ No session key found");
         return new Response(
-          JSON.stringify({ error: "No session key found" }),
+          JSON.stringify({ error: "No session key found for this conversation" }),
           {
             status: 404,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -312,59 +333,102 @@ serve(async (req) => {
         );
       }
 
-      console.log("🔐 EncryptedMessage:", encryptedMessage);
-      console.log("🔐 IV:", iv);
-      console.log("🔐 Session key:", conversation?.session_key_encrypted);
+      const storedKey = conversation.session_key_encrypted;
+      console.log("🔐 Stored session key:", storedKey);
+
+      // Check if the stored key is valid
+      if (!isValidHex(storedKey) || storedKey.length !== 64) {
+        console.log("❌ Invalid session key format or length");
+        return new Response(
+          JSON.stringify({ 
+            error: "Invalid session key. Please send a new message to regenerate the encryption key.",
+            code: "INVALID_SESSION_KEY"
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
 
       let sessionKey: Uint8Array;
       try {
-        // Try to parse as hex first (our current format)
-        sessionKey = hexToUint8Array(conversation.session_key_encrypted);
-        console.log("🔑 Parsed session key as hex, length:", sessionKey.length);
-      } catch (hexError) {
-        console.log("⚠️ Hex parsing failed, trying base64:", hexError);
-        try {
-          // Fallback to base64
-          sessionKey = base64ToUint8Array(conversation.session_key_encrypted);
-          console.log("🔑 Parsed session key as base64, length:", sessionKey.length);
-        } catch (base64Error) {
-          console.log("❌ Both hex and base64 parsing failed:", base64Error);
-          throw new Error("Invalid session key format");
-        }
+        sessionKey = hexToUint8Array(storedKey);
+        console.log("🔑 Parsed session key, length:", sessionKey.length);
+      } catch (error) {
+        console.log("❌ Failed to parse session key:", error);
+        return new Response(
+          JSON.stringify({ 
+            error: "Failed to parse session key",
+            code: "KEY_PARSE_ERROR"
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
       }
 
       // Ensure the key is 32 bytes for AES-256
       if (sessionKey.length !== 32) {
-        throw new Error(`Invalid key length: expected 32 bytes, got ${sessionKey.length} bytes`);
+        console.log("❌ Invalid key length:", sessionKey.length);
+        return new Response(
+          JSON.stringify({ 
+            error: `Invalid key length: expected 32 bytes, got ${sessionKey.length} bytes`,
+            code: "INVALID_KEY_LENGTH"
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
       }
 
       let ivBytes: Uint8Array;
       try {
-        // Try to parse IV as hex first
-        ivBytes = hexToUint8Array(iv);
-        console.log("🔑 Parsed IV as hex, length:", ivBytes.length);
-      } catch (hexError) {
-        console.log("⚠️ IV hex parsing failed, trying base64:", hexError);
-        try {
-          // Fallback to base64 for IV
-          ivBytes = base64ToUint8Array(iv);
-          console.log("🔑 Parsed IV as base64, length:", ivBytes.length);
-        } catch (base64Error) {
-          console.log("❌ Both IV hex and base64 parsing failed:", base64Error);
+        if (!isValidHex(iv)) {
           throw new Error("Invalid IV format");
         }
+        ivBytes = hexToUint8Array(iv);
+        console.log("🔑 Parsed IV, length:", ivBytes.length);
+      } catch (error) {
+        console.log("❌ IV parsing failed:", error);
+        return new Response(
+          JSON.stringify({ 
+            error: "Invalid IV format",
+            code: "INVALID_IV"
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
       }
 
-      const decryptedMessage = await decryptMessage(
-        encryptedMessage,
-        ivBytes,
-        sessionKey
-      );
-      console.log("✅ Decryption succeeded");
+      try {
+        const decryptedMessage = await decryptMessage(
+          encryptedMessage,
+          ivBytes,
+          sessionKey
+        );
+        console.log("✅ Decryption succeeded");
 
-      return new Response(JSON.stringify({ message: decryptedMessage }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+        return new Response(JSON.stringify({ message: decryptedMessage }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } catch (decryptError) {
+        console.log("❌ Decryption failed:", decryptError.message);
+        return new Response(
+          JSON.stringify({ 
+            error: "Failed to decrypt message. The message may be corrupted or encrypted with a different key.",
+            code: "DECRYPTION_FAILED"
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
     }
 
     return new Response(
