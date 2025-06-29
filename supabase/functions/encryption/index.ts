@@ -1,3 +1,4 @@
+
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
@@ -41,6 +42,15 @@ function uint8ArrayToHex(arr: Uint8Array): string {
 }
 
 // Convert hex string to Uint8Array
+function hexToUint8Array(hex: string): Uint8Array {
+  const result = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    result[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return result;
+}
+
+// Convert base64 string to Uint8Array
 function base64ToUint8Array(base64: string): Uint8Array {
   const binaryString = atob(base64);
   const len = binaryString.length;
@@ -135,13 +145,19 @@ serve(async (req) => {
       let sessionKey: Uint8Array;
 
       if (conversation?.session_key_encrypted) {
-        // Decrypt existing session key (in real implementation, this would use user's private key)
-        sessionKey = base64ToUint8Array(conversation.session_key_encrypted);
+        // Try to decrypt existing session key - handle both hex and base64 formats
+        try {
+          // First try as hex (our current format)
+          sessionKey = hexToUint8Array(conversation.session_key_encrypted);
+        } catch {
+          // Fallback to base64 if hex parsing fails
+          sessionKey = base64ToUint8Array(conversation.session_key_encrypted);
+        }
       } else {
         // Generate new session key
         sessionKey = generateKey();
 
-        // Store encrypted session key
+        // Store encrypted session key as hex
         await supabase
           .from("conversations")
           .update({ session_key_encrypted: uint8ArrayToHex(sessionKey) })
@@ -187,14 +203,53 @@ serve(async (req) => {
       if (!conversation?.session_key_encrypted) {
         throw new Error("No session key found");
       }
+
       console.log("🔐 EncryptedMessage:", encryptedMessage);
       console.log("🔐 IV:", iv);
       console.log("🔐 Session key:", conversation?.session_key_encrypted);
-      const sessionKey = base64ToUint8Array(conversation.session_key_encrypted);
+
+      let sessionKey: Uint8Array;
+      try {
+        // Try to parse as hex first (our current format)
+        sessionKey = hexToUint8Array(conversation.session_key_encrypted);
+        console.log("🔑 Parsed session key as hex, length:", sessionKey.length);
+      } catch (hexError) {
+        console.log("⚠️ Hex parsing failed, trying base64:", hexError);
+        try {
+          // Fallback to base64
+          sessionKey = base64ToUint8Array(conversation.session_key_encrypted);
+          console.log("🔑 Parsed session key as base64, length:", sessionKey.length);
+        } catch (base64Error) {
+          console.log("❌ Both hex and base64 parsing failed:", base64Error);
+          throw new Error("Invalid session key format");
+        }
+      }
+
+      // Ensure the key is 32 bytes for AES-256
+      if (sessionKey.length !== 32) {
+        throw new Error(`Invalid key length: expected 32 bytes, got ${sessionKey.length} bytes`);
+      }
+
+      let ivBytes: Uint8Array;
+      try {
+        // Try to parse IV as hex first
+        ivBytes = hexToUint8Array(iv);
+        console.log("🔑 Parsed IV as hex, length:", ivBytes.length);
+      } catch (hexError) {
+        console.log("⚠️ IV hex parsing failed, trying base64:", hexError);
+        try {
+          // Fallback to base64 for IV
+          ivBytes = base64ToUint8Array(iv);
+          console.log("🔑 Parsed IV as base64, length:", ivBytes.length);
+        } catch (base64Error) {
+          console.log("❌ Both IV hex and base64 parsing failed:", base64Error);
+          throw new Error("Invalid IV format");
+        }
+      }
 
       const decryptedMessage = await decryptMessage(
         encryptedMessage,
-        base64ToUint8Array(iv),
+        ivBytes,
         sessionKey
       );
       console.log("✅ Decryption succeeded");
