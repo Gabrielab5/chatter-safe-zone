@@ -1,6 +1,6 @@
+
 import { useCallback, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useE2ECrypto } from "@/hooks/useE2ECrypto";
 import { supabase } from "@/integrations/supabase/client";
 
 interface Message {
@@ -14,11 +14,10 @@ interface Message {
 }
 
 export const useMessageDecryption = () => {
-  const { user, sessionPrivateKey } = useAuth();
-  const { decryptMessage } = useE2ECrypto();
+  const { user } = useAuth();
   const mountedRef = useRef(true);
 
-  // Server-side decryption fallback
+  // Server-side decryption (only method now)
   const decryptMessageServerSide = useCallback(
     async (message: Message): Promise<string> => {
       console.log("📨 Invoking encryption function with:", {
@@ -58,66 +57,25 @@ export const useMessageDecryption = () => {
       }
 
       try {
-        let decryptedContent: string;
-
-        // First try client-side decryption if user has unlocked their session key
-        if (sessionPrivateKey) {
-          try {
-            console.log(
-              "Attempting client-side decryption for message:",
-              message.id
-            );
-            // For client-side decryption, we would need to implement a different approach
-            // since we have the private key directly instead of a password
-            // For now, let's fallback to server-side
-            throw new Error(
-              "Client-side decryption with session key not yet implemented"
-            );
-          } catch (clientError) {
-            console.log(
-              "Client-side decryption failed, trying server-side:",
-              clientError.message
-            );
-
-            // Fallback to server-side decryption
-            try {
-              decryptedContent = await decryptMessageServerSide(message);
-              console.log("Server-side decryption successful");
-            } catch (serverError) {
-              console.error("Both decryption methods failed:", serverError);
-              decryptedContent = "Failed to decrypt message";
-            }
-          }
-        } else {
-          // No client-side session key available, try server-side only
-          try {
-            decryptedContent = await decryptMessageServerSide(message);
-            console.log("Server-side decryption successful (no session key)");
-          } catch (serverError) {
-            console.error("Server-side decryption failed:", serverError);
-            decryptedContent = "Failed to decrypt message";
-          }
-        }
+        console.log('Attempting server-side decryption for message:', message.id);
+        
+        // Use server-side decryption only
+        const decryptedContent = await decryptMessageServerSide(message);
+        console.log('Server-side decryption successful');
 
         return {
           ...message,
           decrypted_content: decryptedContent,
         };
       } catch (error) {
-        console.error("Error in decryptSingleMessage:", error);
+        console.error('Server-side decryption failed:', error);
         return {
           ...message,
-          decrypted_content: "Decryption error",
+          decrypted_content: "Failed to decrypt message",
         };
       }
     },
-    [
-      user?.id,
-      sessionPrivateKey,
-      decryptMessage,
-      decryptMessageServerSide,
-      mountedRef,
-    ]
+    [user?.id, decryptMessageServerSide, mountedRef]
   );
 
   const processBatchDecryption = useCallback(

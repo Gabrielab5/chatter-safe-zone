@@ -2,8 +2,6 @@
 import { useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { useE2ECrypto } from '@/hooks/useE2ECrypto';
-import { fetchPublicKey } from '@/utils/publicKeyManager';
 
 interface Message {
   id: string;
@@ -17,25 +15,9 @@ interface Message {
 
 export const useMessageSending = (conversationId: string | null) => {
   const { user } = useAuth();
-  const { encryptMessage } = useE2ECrypto();
   const mountedRef = useRef(true);
 
-  // Get recipient user ID for the conversation
-  const getRecipientUserId = useCallback(async (convId: string): Promise<string> => {
-    const { data, error } = await supabase
-      .from('conversation_participants')
-      .select('user_id')
-      .eq('conversation_id', convId)
-      .neq('user_id', user?.id);
-
-    if (error || !data || data.length === 0) {
-      throw new Error('Failed to find recipient');
-    }
-
-    return data[0].user_id;
-  }, [user?.id]);
-
-  // Server-side encryption fallback
+  // Server-side encryption (only method now)
   const encryptMessageServerSide = useCallback(async (content: string, convId: string): Promise<{ encryptedMessage: string; iv: string }> => {
     console.log('Using server-side encryption for conversation:', convId);
     
@@ -63,36 +45,12 @@ export const useMessageSending = (conversationId: string | null) => {
     }
 
     try {
-      console.log('Attempting to send message...');
+      console.log('Sending message with server-side encryption only...');
       
-      let encryptedMessage: string;
-      let iv: string;
-      let encryptionMethod = 'server-side'; // Default to server-side
-
-      try {
-        // Try client-side E2EE first
-        const recipientUserId = await getRecipientUserId(conversationId);
-        const recipientPublicKey = await fetchPublicKey(recipientUserId);
-        
-        console.log('Attempting client-side E2EE encryption...');
-        const clientEncryption = await encryptMessage(content, recipientPublicKey);
-        encryptedMessage = clientEncryption.encryptedMessage;
-        iv = clientEncryption.iv;
-        encryptionMethod = 'client-side';
-        console.log('Client-side E2EE encryption successful');
-        
-      } catch (keyError) {
-        console.log('Client-side E2EE failed, using server-side encryption:', keyError.message);
-        
-        // Fallback to server-side encryption
-        const serverEncryption = await encryptMessageServerSide(content, conversationId);
-        encryptedMessage = serverEncryption.encryptedMessage;
-        iv = serverEncryption.iv;
-        encryptionMethod = 'server-side';
-        console.log('Server-side encryption successful');
-      }
+      // Use server-side encryption only
+      const { encryptedMessage, iv } = await encryptMessageServerSide(content, conversationId);
       
-      console.log(`Message encrypted using ${encryptionMethod} encryption, saving to database...`);
+      console.log('Message encrypted using server-side encryption, saving to database...');
       
       // Save encrypted message to database
       let retryCount = 0;
@@ -140,7 +98,7 @@ export const useMessageSending = (conversationId: string | null) => {
         decrypted_content: content
       };
       
-      console.log(`Message sent successfully using ${encryptionMethod} encryption`);
+      console.log('Message sent successfully using server-side encryption');
       return newMessage;
 
     } catch (error) {
@@ -154,7 +112,7 @@ export const useMessageSending = (conversationId: string | null) => {
         throw new Error('Failed to send message. Please try again.');
       }
     }
-  }, [conversationId, user, getRecipientUserId, encryptMessage, encryptMessageServerSide]);
+  }, [conversationId, user, encryptMessageServerSide]);
 
   return {
     sendMessage,

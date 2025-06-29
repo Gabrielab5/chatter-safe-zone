@@ -17,7 +17,7 @@ interface Message {
 }
 
 export const useRealTimeMessages = (conversationId: string | null) => {
-  const { sessionPrivateKey } = useAuth();
+  const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,21 +86,6 @@ export const useRealTimeMessages = (conversationId: string | null) => {
       }
     }
   }, [conversationId, fetchMessages, processBatchDecryption, decryptionMountedRef]);
-
-  // Re-decrypt messages when session key becomes available
-  useEffect(() => {
-    if (sessionPrivateKey && messages.length > 0) {
-      console.log('Session key now available, re-decrypting messages...');
-      processBatchDecryption(messages.map(msg => ({
-        ...msg,
-        decrypted_content: undefined // Reset to trigger re-decryption
-      }))).then(decryptedMessages => {
-        if (decryptionMountedRef.current) {
-          setMessages(decryptedMessages);
-        }
-      });
-    }
-  }, [sessionPrivateKey, processBatchDecryption, decryptionMountedRef]);
 
   // Load messages when conversation changes
   useEffect(() => {
